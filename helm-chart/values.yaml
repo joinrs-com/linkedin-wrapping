@@ -1,0 +1,18 @@
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+image: 343417272737.dkr.ecr.eu-central-1.amazonaws.com/linkedin-wrapping-service
+
+database:
+  DATABASE_URL: ""
+
+ingress:
+  enabled: true
+  host: lw.joinrs.com
+  certificateArn: "arn:aws:acm:eu-central-1:343417272737:certificate/7e1a8968-bab3-4d30-a6f1-7b14a20b576a"
+  group:
+    name: ""  # Optional: ALB ingress group name for sharing ALB across ingresses
+

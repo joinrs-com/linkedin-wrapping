@@ -1,0 +1,5 @@
+apiVersion: v2
+name: linkedin-wrapping
+description: A Helm chart for linkedin-wrapping-service
+version: 0.1.0
+

@@ -1,0 +1,69 @@
+name: Deploy Geolocations Services to EKS
+
+on:
+  push:
+    branches:
+      - main
+      - stage
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    environment: ${{ github.ref_name == 'main' && 'production' || 'stage' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set BRANCH variable
+      run: echo "BRANCH=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v3
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: eu-central-1
+
+    - name: Set up helm
+      uses: azure/setup-helm@v4.2.0
+      with:
+        version: v3.14.4
+
+    - name: Update kubeconfig for EKS
+      run: |
+        export KUBECONFIG=$HOME/.kube/config
+        CREDENTIALS=$(aws sts assume-role --role-arn arn:aws:iam::343417272737:role/EKSKubectlRole --role-session-name codebuild-kubectl --duration-seconds 900)
+        export AWS_ACCESS_KEY_ID="$(echo ${CREDENTIALS} | jq -r '.Credentials.AccessKeyId')"
+        export AWS_SECRET_ACCESS_KEY="$(echo ${CREDENTIALS} | jq -r '.Credentials.SecretAccessKey')"
+        export AWS_SESSION_TOKEN="$(echo ${CREDENTIALS} | jq -r '.Credentials.SessionToken')"
+        export AWS_EXPIRATION=$(echo ${CREDENTIALS} | jq -r '.Credentials.Expiration')
+        if [[ "$BRANCH" == "stage" ]]; then
+          CLUSTER_NAME="tutored-stage"
+        else
+          CLUSTER_NAME="tutored-production"
+        fi
+        aws eks update-kubeconfig --name $CLUSTER_NAME --region ${{ vars.AWS_REGION }} --role-arn ${{ vars.EKS_KUBECTL_ROLE_ARN }}
+
+    - name: Log in to Amazon ECR
+      id: login-ecr
+      run: |
+        aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${{ vars.ECR_REPOSITORY }}
+
+    - name: Build push Docker image and Deploy with Helm
+      run: |
+        cd auth-services
+        IMAGE_TAG=$BRANCH$(date +%Y%m%d%H%M%S)
+        IMAGE=${{ vars.ECR_REPOSITORY }}/auth:$IMAGE_TAG
+        docker build -t $IMAGE .
+        docker push $IMAGE
+        echo "IMAGE:$IMAGE"
+        helm upgrade --install auth ./helm-chart --set image=$IMAGE --namespace auth --create-namespace -f ./helm-chart/values.yaml -f ./helm-chart/environments/$BRANCH/values.yaml
+      env:
+        IMAGE_TAG: latest

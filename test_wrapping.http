@@ -1,0 +1,9 @@
+### Health
+GET http://localhost:3000/health
+
+### Root
+GET http://localhost:3000/
+
+### Get Wrapping (Job Postings)
+GET http://localhost:3000/wrapping
+
