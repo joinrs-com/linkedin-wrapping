@@ -94,3 +94,4 @@ def test_wrapping_endpoint_with_jobs(client: TestClient):
     assert "<job" in content
     assert "/>" in content or "</job>" in content
 
+

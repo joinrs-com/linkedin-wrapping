@@ -103,3 +103,4 @@ helm install linkedin-wrapping ./helm-chart \
 
 - `DATABASE_URL`: Database connection string (required)
 
+

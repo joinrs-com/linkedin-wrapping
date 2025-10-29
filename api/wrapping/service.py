@@ -13,3 +13,4 @@ def get_available_job_postings(session: Session) -> List[JobPostings]:
     results = session.exec(statement)
     return list(results.all())
 
+

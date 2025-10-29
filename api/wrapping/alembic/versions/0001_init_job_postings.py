@@ -32,3 +32,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("job_postings", schema="lw")
 
+

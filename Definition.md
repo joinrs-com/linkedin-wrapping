@@ -29,5 +29,5 @@ body: <postings>
   "position"= <job posting position> 
   />
 </postings>
->
+
 

@@ -210,3 +210,4 @@ async def lookup_geo(ip: Optional[str]) -> Dict[str, Any]:
     except Exception:
         return {}
 
+
