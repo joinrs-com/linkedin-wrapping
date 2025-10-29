@@ -31,4 +31,3 @@ body: <postings>
 </postings>
 >
 
-
