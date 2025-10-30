@@ -25,6 +25,13 @@ class JobPostings(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     position: str
     description: str | None = None
+    company: str | None = None
+    apply_url: str | None = None
+    company_id: str | None = None
+    location: str | None = None
+    workplace_types: str | None = None
+    experience_level: str | None = None
+    jobtype: str | None = None
     created_at: datetime | None = Field(default=None, sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP"})
     updated_at: datetime | None = Field(
         default=None,

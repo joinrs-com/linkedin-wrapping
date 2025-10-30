@@ -56,10 +56,22 @@ Returns XML containing job postings available for LinkedIn wrapping.
 
 **Response:**
 ```xml
-<postings>
-  <job id="1" position="Software Engineer" />
-  <job id="2" position="Data Scientist" />
-</postings>
+<?xml version="1.0" encoding="UTF-8"?>
+<source>
+  <lastBuildDate> Mon, 08 Jan 2024 11:34:23 GMT </lastBuildDate>
+  <job>
+    <partnerJobId><![CDATA[1]]></partnerJobId>
+    <company><![CDATA[Example, Inc.]]></company>
+    <title><![CDATA[Software Engineer]]></title>
+    <description><![CDATA[<strong>Awesome role</strong>]]></description>
+    <applyUrl><![CDATA[https://example.com/jobs/1]]></applyUrl>
+    <companyId><![CDATA[12345]]></companyId>
+    <location><![CDATA[Rome, Italy]]></location>
+    <workplaceTypes><![CDATA[On-site]]></workplaceTypes>
+    <experienceLevel><![CDATA[Internship]]></experienceLevel>
+    <jobtype><![CDATA[Full Time]]></jobtype>
+  </job>
+  <!-- more <job> entries -->
 ```
 
 ### GET /health

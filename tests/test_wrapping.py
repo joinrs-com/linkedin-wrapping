@@ -64,8 +64,9 @@ def test_wrapping_endpoint_empty(client: TestClient):
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/xml"
     content = r.text
-    assert "<postings>" in content
-    assert "</postings>" in content
+    assert "<source>" in content
+    assert "</source>" in content
+    assert "<lastBuildDate>" in content
 
 
 def test_wrapping_endpoint_with_jobs(client: TestClient):
@@ -85,13 +86,15 @@ def test_wrapping_endpoint_with_jobs(client: TestClient):
     content = r.text
     
     # Check XML structure
-    assert "<postings>" in content
-    assert "</postings>" in content
-    assert 'id="1"' in content
-    assert 'position="Software Engineer"' in content
-    assert 'id="2"' in content
-    assert 'position="Data Scientist"' in content
-    assert "<job" in content
-    assert "/>" in content or "</job>" in content
+    assert "<source>" in content
+    assert "</source>" in content
+    assert "<lastBuildDate>" in content
+    # Job 1
+    assert "<job>" in content
+    assert "<![CDATA[1]]>" in content  # partnerJobId CDATA
+    assert "<![CDATA[Software Engineer]]>" in content  # title CDATA
+    # Job 2
+    assert "<![CDATA[2]]>" in content
+    assert "<![CDATA[Data Scientist]]>" in content
 
 
