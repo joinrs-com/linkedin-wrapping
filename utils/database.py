@@ -1,7 +1,13 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlmodel import create_engine, Session
 
+# Load .env file before reading DATABASE_URL
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
 
 database_url = os.getenv('DATABASE_URL', 'sqlite:///:memory:')
 

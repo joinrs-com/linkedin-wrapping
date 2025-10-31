@@ -17,7 +17,12 @@ def _format_rfc1123_gmt(dt: datetime | None = None) -> str:
 
 def generate_wrapping_xml(job_postings) -> str:
     """Generate XML response for LinkedIn wrapping in the LinkedIn expected format."""
-    last_build_date = _format_rfc1123_gmt()
+    # Use max last_build_date from job postings if available, otherwise generate current time
+    last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
+    if last_build_dates:
+        last_build_date = _format_rfc1123_gmt(max(last_build_dates))
+    else:
+        last_build_date = _format_rfc1123_gmt()
 
     parts: list[str] = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
@@ -25,7 +30,8 @@ def generate_wrapping_xml(job_postings) -> str:
     parts.append(f" <lastBuildDate> {last_build_date} </lastBuildDate>")
 
     for job in job_postings:
-        partner_job_id = job.id if getattr(job, "id", None) is not None else ""
+        # Use partner_job_id if available, fallback to id
+        partner_job_id = getattr(job, "partner_job_id", None) or (job.id if getattr(job, "id", None) is not None else "")
         company = getattr(job, "company", None) or ""
         title = job.position if getattr(job, "position", None) else ""
         description = getattr(job, "description", None) or ""

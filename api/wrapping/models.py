@@ -32,6 +32,8 @@ class JobPostings(SQLModel, table=True):
     workplace_types: str | None = None
     experience_level: str | None = None
     jobtype: str | None = None
+    partner_job_id: str | None = None
+    last_build_date: datetime | None = None
     created_at: datetime | None = Field(default=None, sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP"})
     updated_at: datetime | None = Field(
         default=None,
