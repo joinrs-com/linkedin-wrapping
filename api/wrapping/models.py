@@ -40,3 +40,26 @@ class JobPostings(SQLModel, table=True):
         sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP", "onupdate": datetime.now}
     )
 
+
+class JobPostingPre(SQLModel, table=True):
+    __tablename__ = "job_posting_pre"
+    __table_args__ = _resolve_schema()
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    position: str
+    job_description: str | None = None
+    company: str | None = None
+    apply_url: str | None = None
+    company_id: str | None = None
+    location: str | None = None
+    workplace_types: str | None = None
+    experience_level: str | None = None
+    jobtype: str | None = None
+    partner_job_id: str | None = None
+    last_build_date: datetime | None = None
+    created_at: datetime | None = Field(default=None, sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP"})
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP", "onupdate": datetime.now}
+    )
+
