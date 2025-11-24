@@ -155,10 +155,7 @@ def get_new_job_postings_to_process(session: Session) -> List[JobPostingPre]:
     skipped_count = 0
     
     for job_pre in all_pre:
-        if not job_pre.partner_job_id:
-            # Record senza partner_job_id: li processiamo sempre (non possiamo verificare se già presenti)
-            new_job_postings.append(job_pre)
-        elif job_pre.partner_job_id not in existing_partner_ids:
+        if job_pre.partner_job_id not in existing_partner_ids:
             # Nuovo record: da processare
             new_job_postings.append(job_pre)
         else:
@@ -192,10 +189,20 @@ def remove_expired_job_postings(session: Session):
     # 1. Ottieni tutti i partner_job_id da job_posting_pre
     pre_partner_ids = set()
     pre_records = session.exec(select(JobPostingPre)).all()
+    
+    # SICUREZZA: Verifica che job_posting_pre non sia vuoto
+    if not pre_records:
+        print("⚠️  ATTENZIONE: job_posting_pre è vuota!")
+        print("   Non rimuoverò nessun record per sicurezza.")
+        print("   Assicurati di aver caricato i dati correttamente.")
+        print("=" * 60 + "\n")
+        return 0
+    
     for pre in pre_records:
         if pre.partner_job_id:
             pre_partner_ids.add(pre.partner_job_id)
     
+    print(f"Trovati {len(pre_records)} record in job_posting_pre.")
     print(f"Trovati {len(pre_partner_ids)} partner_job_id attivi in job_posting_pre.")
     
     # 2. Trova i record in job_postings che non sono più in job_posting_pre
@@ -203,26 +210,42 @@ def remove_expired_job_postings(session: Session):
     expired_postings = []
     
     for posting in all_postings:
-        if posting.partner_job_id:
-            # Se il partner_job_id non è più in job_posting_pre, il record è scaduto
-            if posting.partner_job_id not in pre_partner_ids:
-                expired_postings.append(posting)
-        else:
-            # Record senza partner_job_id: li manteniamo (non possiamo verificare se scaduti)
-            pass
+        # Se il partner_job_id non è più in job_posting_pre, il record è scaduto
+        if posting.partner_job_id and posting.partner_job_id not in pre_partner_ids:
+            expired_postings.append(posting)
     
     if not expired_postings:
         print("\n✅ Nessun annuncio scaduto da rimuovere.")
         print("=" * 60 + "\n")
         return 0
     
-    # 3. Mostra informazioni sugli annunci scaduti
+    # 3. Mostra informazioni dettagliate sugli annunci scaduti
     print(f"\n⚠️  Trovati {len(expired_postings)} annunci scaduti da rimuovere.")
-    print("Primi 10 annunci scaduti:")
-    for i, posting in enumerate(expired_postings[:10], 1):
-        print(f"  {i}. ID: {posting.id}, partner_job_id: {posting.partner_job_id}, position: {posting.position}")
-    if len(expired_postings) > 10:
-        print(f"  ... e altri {len(expired_postings) - 10}")
+    print("\n" + "-" * 100)
+    print(f"{'ID':<6} | {'partner_job_id':<15} | {'Position':<40} | {'Company':<20}")
+    print("-" * 100)
+    
+    # Mostra tutti i record scaduti in formato tabella
+    for posting in expired_postings:
+        position_short = (posting.position[:38] + '..') if posting.position and len(posting.position) > 40 else (posting.position or 'N/A')
+        company_short = (posting.company[:18] + '..') if posting.company and len(posting.company) > 20 else (posting.company or 'N/A')
+        print(f"{str(posting.id):<6} | {str(posting.partner_job_id):<15} | {position_short:<40} | {company_short:<20}")
+    
+    print("-" * 100)
+    
+    # Mostra dettagli completi dei primi 5 record
+    if len(expired_postings) > 0:
+        print(f"\n📋 Dettagli completi dei primi 5 record scaduti:")
+        for i, posting in enumerate(expired_postings[:5], 1):
+            print(f"\n  {i}. Record ID: {posting.id}")
+            print(f"     partner_job_id: {posting.partner_job_id}")
+            print(f"     Position: {posting.position or 'N/A'}")
+            print(f"     Company: {posting.company or 'N/A'}")
+            print(f"     Location: {posting.location or 'N/A'}")
+            print(f"     Created at: {posting.created_at or 'N/A'}")
+        
+        if len(expired_postings) > 5:
+            print(f"\n  ... e altri {len(expired_postings) - 5} record scaduti")
     
     # 4. Rimuovi i record scaduti
     print(f"\n🗑️  Rimuovendo {len(expired_postings)} annunci scaduti da job_postings...")
@@ -385,10 +408,12 @@ def process_and_insert_incremental(engine, job_postings: List[JobPostingPre], ba
         print(f"  📊 Progresso: {total_processed} processati, {total_inserted} inseriti")
     
     print(f"\n{'='*60}")
-    print(f"Riepilogo finale:")
+    print(f"Riepilogo processamento:")
     print(f"  - Totali processati: {total_processed}")
     print(f"  - Totali inseriti: {total_inserted}")
     print(f"{'='*60}")
+    
+    return total_inserted
 
 
 def insert_job_postings_batch(session: Session, job_postings: List[JobPostings], batch_size: int = 100):
@@ -478,29 +503,45 @@ def main():
             # 2. Identifica i nuovi record da processare
             # (solo quelli presenti in job_posting_pre ma non in job_postings)
             new_job_postings = get_new_job_postings_to_process(session)
+            new_records_count = len(new_job_postings)
             
             if not new_job_postings:
                 print("Nessun nuovo record da processare.")
-                if expired_count > 0:
-                    print(f"Rimossi {expired_count} annunci scaduti.")
                 # Esegui comunque la verifica finale
                 all_processed = verify_all_processed(engine)
                 if all_processed:
                     print("\n✅ Tutti i record sono già stati processati correttamente.")
+                
+                # Mostra riepilogo finale
+                print("\n" + "=" * 60)
+                print("RIEPILOGO FINALE")
+                print("=" * 60)
+                print(f"  📊 Record scaduti eliminati: {expired_count}")
+                print(f"  📊 Nuovi record trovati: {new_records_count}")
+                print(f"  📊 Nuovi record processati: 0")
+                print("=" * 60)
                 return
             
             # 3. Processa e inserisci solo i nuovi record
             # Passa engine invece di session per creare nuove sessioni per ogni batch
-            process_and_insert_incremental(engine, new_job_postings, batch_size=20)
+            processed_count = process_and_insert_incremental(engine, new_job_postings, batch_size=20)
         
         # 4. Verifica finale che tutti i partner_job_id siano stati processati
         all_processed = verify_all_processed(engine)
         
+        # 5. Mostra riepilogo finale
         print("\n" + "=" * 60)
+        print("RIEPILOGO FINALE")
+        print("=" * 60)
+        print(f"  📊 Record scaduti eliminati: {expired_count}")
+        print(f"  📊 Nuovi record trovati: {new_records_count}")
+        print(f"  📊 Nuovi record processati: {processed_count}")
+        print("=" * 60)
+        
         if all_processed:
-            print("✅ Script completato con successo! Tutti i record sono stati processati.")
+            print("\n✅ Script completato con successo! Tutti i record sono stati processati.")
         else:
-            print("⚠️  Script completato, ma alcuni record non sono stati processati.")
+            print("\n⚠️  Script completato, ma alcuni record non sono stati processati.")
             print("   Riavvia lo script per processare i record mancanti.")
         print("=" * 60)
         
