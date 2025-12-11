@@ -29,55 +29,93 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # Prompt OpenAI
 OPENAI_PROMPT = """Il tuo compito è:
 
-modificare il summary dell'annuncio ovvero la prima parte della job description in questo modo:
+### 1) Migliorare il SUMMARY dell'annuncio
 
-(Il riassunto dell'opportunità da parte della Joinrs AI: Canonical è alla ricerca di numerosi Junior Software Support Engineer da assumere a tempo pieno con laurea in ingegneria o discipline STEM. I candidati risolveranno problemi complessi, svilupperanno correzioni di bug e collaboreranno con team globali. I benefit includono lavoro da remoto o presso uno degli uffici, bonus annuale, budget per la formazione, ferie e opportunità di viaggio.)
+Il summary è la parte compresa tra:
 
-- fai risaltare la posizione e la laurea richiesta;
+<p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>
 
-- breve descrizione del ruolo;
+    [TESTO DEL SUMMARY ORIGINALE]
 
-- benefit e RAL se sono presenti nell'annuncio;
+</p>
 
-- utilizza sempre la terza persona nel summary
+Trasforma SOLO quel testo seguendo queste regole:
 
-- mantieni la lingua originale dell'annuncio
+- evidenzia chiaramente la posizione ricercata
 
-lascia intatto tutto il resto ovvero:
+- evidenzia il tipo di laurea richiesta (se presente)
 
-- introduzione: <p><strong>Questa posizione è in ', e.name, '</strong><br><br></p>', 
+- aggiungi una breve descrizione del ruolo
 
-- conclusione: '<br><br><em>Il processo di selezione sarà interamente gestito da ',
+- aggiungi benefit e RAL se presenti nell'annuncio
 
-- locations: <br><br><em>Questa opportunità è disponibile su ',
+- usa SEMPRE la terza persona
 
-Per description invece:
+- mantieni la lingua originale
 
-- togli tutti i link o collegamenti esterni
+- NON modificare nessun altro elemento fuori dal summary
 
-- non modificare il testo originale dell'annuncio
+### 2) Parti da NON modificare mai
 
-- mantieni la lingua originale dell'annuncio
+Lasciale identiche e non alterarle:
 
-- dividi il testo in paragrafi senzati e inserisci gli elenchi puntati nel testo dove necessari per migliorare la leggibilità
+- introduzione:
 
-restituisci la job description in HTML e utilizza questi tag html che sono i soli supportati: 
+  <p><strong>Questa posizione è in NOME_AZIENDA</strong></p>
 
-<b>, <strong> Bold/Strong
+  <br><br>
 
-<u> Underline
+- intestazione summary:
 
-<i> italic
+  <p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>
 
-<br> Line Break
+- conclusione:
 
-<p> Paragraph
+  <br><br><em>Il processo di selezione sarà interamente gestito da NOME_AZIENDA.</em>
 
-<ul> Unordered List
+- locations:
 
-<li> Ordered List 
+  <br><br><em>Questa opportunità è disponibile su ...
 
-<em> Emphasized text(italics)"""
+### 3) Per la DESCRIPTION (tutto il testo dopo il summary e prima dei tag finali)
+
+- non modificare il contenuto della descrizione originale
+
+- mantieni la lingua originale
+
+- elimina tutti i link esterni (URL)
+
+- suddividi il testo in paragrafi sensati
+
+- quando necessario, crea liste puntate usando <ul><li></li></ul>
+
+- dopo OGNI paragrafo inserisci SEMPRE due line break:
+
+  
+
+  <br><br>
+
+⚠️ IMPORTANTE:
+
+- I <br><br> devono sempre essere fuori dai tag <p>
+
+- NON utilizzare mai <p>&nbsp;</p>
+
+- NON inserire altri tipi di spaziatori o HTML non supportato
+
+### 4) Requisiti HTML
+
+Utilizza esclusivamente questi tag supportati da LinkedIn Recruiter:
+
+<b>, <strong>, <u>, <i>, <br>, <p>, <ul>, <li>, <em>
+
+### 5) Output
+
+Restituisci l'intera job description in HTML mantenendo esattamente tutta la struttura originale,
+
+tranne il testo del summary e la formattazione della description come richiesto.
+
+"""
 
 
 def create_database_engine():
