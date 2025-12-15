@@ -27,93 +27,60 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Prompt OpenAI
-OPENAI_PROMPT = """Il tuo compito è:
+OPENAI_PROMPT = """ Il tuo compito è:
 
-### 1) Migliorare il SUMMARY dell'annuncio
+#1) Migliorare il SUMMARY dell'annuncio:
 
-Il summary è la parte compresa tra:
-
+Il summary è composto da una parte fissa e una parte variabile:
 <p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>
-
-    [TESTO DEL SUMMARY ORIGINALE]
-
+    [TESTO DEL SUMMARY ORIGINALE PARTE VARIABILE]
 </p>
 
-Trasforma SOLO quel testo seguendo queste regole:
+Migliora il summary dell'annuncio come segue:
 
-- evidenzia chiaramente la posizione ricercata
+(Il riassunto dell'opportunità da parte della Joinrs AI: Canonical è alla ricerca di numerosi Junior Software Support Engineer da assumere a tempo pieno con laurea in ingegneria o discipline STEM. I candidati risolveranno problemi complessi, svilupperanno correzioni di bug e collaboreranno con team globali. I benefit includono lavoro da remoto o presso uno degli uffici, bonus annuale, budget per la formazione, ferie e opportunità di viaggio.);
 
-- evidenzia il tipo di laurea richiesta (se presente)
+come in questo esempio:
+ - fai risaltare la posizione e la laurea richiesta mettendo in grassetto le informazioni più importanti; 
+ - breve descrizione del ruolo;
+ - benefit e RAL se sono presenti nell'annuncio; 
+ - il summary non deve essere più lungo di quello dell’esempio sopra;
 
-- aggiungi una breve descrizione del ruolo
 
-- aggiungi benefit e RAL se presenti nell'annuncio
+La parte iniziale dell'annuncio è composta da:
 
-- usa SEMPRE la terza persona
+- introduzione: <p><strong>Questa posizione è in NOME_AZIENDA</strong></p><p>.</p> 
 
-- mantieni la lingua originale
+- intestazione summary: <p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>
 
-- NON modificare nessun altro elemento fuori dal summary
+- summary: <p>[TESTO DEL SUMMARY ORIGINALE]</p>
 
-### 2) Parti da NON modificare mai
-
-Lasciale identiche e non alterarle:
-
-- introduzione:
-
-  <p><strong>Questa posizione è in NOME_AZIENDA</strong></p>
-
-  <br><br>
-
-- intestazione summary:
-
-  <p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>
-
-- conclusione:
-
-  <br><br><em>Il processo di selezione sarà interamente gestito da NOME_AZIENDA.</em>
-
-- locations:
-
-  <br><br><em>Questa opportunità è disponibile su ...
-
-### 3) Per la DESCRIPTION (tutto il testo dopo il summary e prima dei tag finali)
-
-- non modificare il contenuto della descrizione originale
-
-- mantieni la lingua originale
-
-- elimina tutti i link esterni (URL)
-
-- suddividi il testo in paragrafi sensati
-
-- quando necessario, crea liste puntate usando <ul><li></li></ul>
-
-- dopo OGNI paragrafo inserisci SEMPRE due line break:
-
+- conclusione: <p>.</p><em>Il processo di selezione sarà interamente gestito da NOME_AZIENDA.</em>
   
+- locations: <p>.</p><em>Questa opportunità è disponibile su ...
 
-  <br><br>
 
-⚠️ IMPORTANTE:
+NOTA: la STRUTTURA HTML della parte iniziale dell'annuncio deve essere mantenuta invariata tranne il summary che dovra essere migliorato.
 
-- I <br><br> devono sempre essere fuori dai tag <p>
+ 
 
-- NON utilizzare mai <p>&nbsp;</p>
+#2) Formattare la DESCRIPTION ovvero la seconda parte dell'annuncio:
 
-- NON inserire altri tipi di spaziatori o HTML non supportato
+Per la DESCRIPTION (tutto il testo dopo il summary e prima dei tag finali):
 
-### 4) Requisiti HTML
+ - elimina tutti i link o collegamenti esterni dalla description;
 
-Utilizza esclusivamente questi tag supportati da LinkedIn Recruiter:
+ - non modificare il testo originale della description, ma elimina tutti i tag html non supportati e sostituiscili con quelli supportati (successivamente troverai quelli supportati);
 
-<b>, <strong>, <u>, <i>, <br>, <p>, <ul>, <li>, <em>
+ - la lingua della description NON deve essere modificata, mantieni la lingua originale dell'annuncio;
 
-### 5) Output
+ - dividi il testo in paragrafi coerenti e inserisci gli elenchi puntati nel testo dove necessari per migliorare la leggibilità;
 
-Restituisci l'intera job description in HTML mantenendo esattamente tutta la struttura originale,
+Restituisci la job description in HTML e tra un paragrafo e l'altro della description inserisci sempre un paragrafo nel formato <p>--</p> per garantire la corretta visualizzazione su LinkedIn Recruiter.
+ 
+Utilizza solo questi tag html supportati da LinkedIn Recruiter:
+ <b>, <strong> Bold/Strong <u> Underline <i> italic <br> Line Break <p> Paragraph <ul> Unordered List <li> Ordered List <em> Emphasized text(italics)
 
-tranne il testo del summary e la formattazione della description come richiesto.
 
 """
 
