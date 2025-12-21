@@ -44,20 +44,21 @@ come in questo esempio:
  - fai risaltare la posizione e la laurea richiesta mettendo in grassetto le informazioni più importanti; 
  - breve descrizione del ruolo;
  - benefit e RAL se sono presenti nell'annuncio; 
+ - utilizza la "terza persona" nel summary;
  - il summary non deve essere più lungo di quello dell’esempio sopra;
 
 
 La parte iniziale dell'annuncio è composta da:
 
-- introduzione: <p><strong>Questa posizione è in NOME_AZIENDA</strong></p><p>.</p> 
+- introduzione: <p><strong>Questa posizione è in NOME_AZIENDA</strong><p><br>
 
-- intestazione summary: <p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>
+- intestazione summary: <p><strong>Riassunto dell'opportunità da parte della <i>Joinrs AI</i>:</strong>...
 
-- summary: <p>[TESTO DEL SUMMARY ORIGINALE]</p>
+- summary: ...[TESTO DEL SUMMARY ORIGINALE]</p><br><br>
 
-- conclusione: <p>.</p><em>Il processo di selezione sarà interamente gestito da NOME_AZIENDA.</em>
+- conclusione: <br><p><em>Il processo di selezione sarà interamente gestito da NOME_AZIENDA.</em></p>
   
-- locations: <p>.</p><em>Questa opportunità è disponibile su ...
+- locations: <br><br><p><em>Questa opportunità è disponibile su LOCATIONS</em></p>
 
 
 NOTA: la STRUTTURA HTML della parte iniziale dell'annuncio deve essere mantenuta invariata tranne il summary che dovra essere migliorato.
@@ -66,7 +67,7 @@ NOTA: la STRUTTURA HTML della parte iniziale dell'annuncio deve essere mantenuta
 
 #2) Formattare la DESCRIPTION ovvero la seconda parte dell'annuncio:
 
-Per la DESCRIPTION (tutto il testo dopo il summary e prima dei tag finali):
+Per la DESCRIPTION (tutto il testo dopo il summary e prima delle etichette finali):
 
  - elimina tutti i link o collegamenti esterni dalla description;
 
@@ -76,8 +77,21 @@ Per la DESCRIPTION (tutto il testo dopo il summary e prima dei tag finali):
 
  - dividi il testo in paragrafi coerenti e inserisci gli elenchi puntati nel testo dove necessari per migliorare la leggibilità;
 
-Restituisci la job description in HTML e tra un paragrafo e l'altro della description inserisci sempre un paragrafo nel formato <p>--</p> per garantire la corretta visualizzazione su LinkedIn Recruiter.
- 
+Restituisci la job description in HTML e tra un paragrafo e l'altro della description inserisci SEMPRE e SOLO due "<br><br>" consecutivi fuori dai tag <p> per garantire la corretta visualizzazione su LinkedIn Recruiter.
+
+
+Le etichette finali utilizzate sono:
+
+ - [#J-REMOTE]
+ - [#J-INTERNAL]
+ - [#J-MCITY]
+ - [#J-ENTERPRISE]
+ - [#J-ONE]
+ - [#J-MIN]
+
+Sono state inserite manualmente (alla fine della description) attraverso la query che genera i dati per la tabella "job_posting_pre", non modificarle,
+assicurati che siano visualizzate correttamente a fine description se presenti.
+
 Utilizza solo questi tag html supportati da LinkedIn Recruiter:
  <b>, <strong> Bold/Strong <u> Underline <i> italic <br> Line Break <p> Paragraph <ul> Unordered List <li> Ordered List <em> Emphasized text(italics)
 
