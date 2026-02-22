@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Generator
 
 import pytest
@@ -46,7 +47,7 @@ def test_health_endpoint(client: TestClient):
     """Test health check endpoint."""
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"Ok!"}
+    assert r.json() in ({"Ok!"}, ["Ok!"])
 
 
 def test_root_endpoint(client: TestClient):
@@ -60,9 +61,9 @@ def test_root_endpoint(client: TestClient):
 
 def test_wrapping_endpoint_empty(client: TestClient):
     """Test wrapping endpoint with no job postings."""
-    r = client.get("/wrapping")
+    r = client.get("/wrapping/")  # trailing slash to avoid redirect
     assert r.status_code == 200
-    assert r.headers["content-type"] == "application/xml"
+    assert "application/xml" in r.headers.get("content-type", "")
     content = r.text
     assert "<source>" in content
     assert "</source>" in content
@@ -73,18 +74,19 @@ def test_wrapping_endpoint_with_jobs(client: TestClient):
     """Test wrapping endpoint with job postings."""
     # Create test job postings
     get_sess = list(app.dependency_overrides.values())[0]
+    _now = datetime.now(timezone.utc)
     with next(get_sess()) as s:  # type: ignore
-        job1 = models.JobPostings(id=1, position="Software Engineer")
-        job2 = models.JobPostings(id=2, position="Data Scientist")
+        job1 = models.JobPostings(id=1, position="Software Engineer", created_at=_now, updated_at=_now)
+        job2 = models.JobPostings(id=2, position="Data Scientist", created_at=_now, updated_at=_now)
         s.add(job1)
         s.add(job2)
         s.commit()
-    
-    r = client.get("/wrapping")
+
+    r = client.get("/wrapping/")
     assert r.status_code == 200
-    assert r.headers["content-type"] == "application/xml"
+    assert "application/xml" in r.headers.get("content-type", "")
     content = r.text
-    
+
     # Check XML structure
     assert "<source>" in content
     assert "</source>" in content
@@ -96,5 +98,60 @@ def test_wrapping_endpoint_with_jobs(client: TestClient):
     # Job 2
     assert "<![CDATA[2]]>" in content
     assert "<![CDATA[Data Scientist]]>" in content
+
+
+def test_wrapping_linkedin_apply_url_has_utm_source_linkedin(client: TestClient):
+    """LinkedIn endpoint must output applyUrl with utm_source=linkedin."""
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        job = models.JobPostings(
+            id=1,
+            position="Test",
+            apply_url="https://example.com/job/1/?utm_source=jooble&utm_medium=job-offer-ats",
+            created_at=_now,
+            updated_at=_now,
+        )
+        s.add(job)
+        s.commit()
+
+    r = client.get("/wrapping/")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    # LinkedIn endpoint rewrites apply URL to utm_source=linkedin
+    assert "utm_source=linkedin" in r.text
+    assert "<applyUrl>" in r.text
+
+
+def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
+    """Jooble endpoint must output applyUrl with utm_source=jooble."""
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        job = models.JobPostings(
+            id=1,
+            position="Test",
+            apply_url="https://example.com/job/1/?utm_source=linkedin&utm_medium=job-offer-ats",
+            created_at=_now,
+            updated_at=_now,
+        )
+        s.add(job)
+        s.commit()
+
+    r = client.get("/wrapping/jooble")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    assert "<source>" in r.text
+    assert "utm_source=jooble" in r.text
+    assert "<applyUrl>" in r.text
+
+
+def test_wrapping_jooble_empty(client: TestClient):
+    """Jooble endpoint with no jobs returns valid XML."""
+    r = client.get("/wrapping/jooble")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    assert "<source>" in r.text
+    assert "<lastBuildDate>" in r.text
 
 

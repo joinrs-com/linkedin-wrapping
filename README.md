@@ -4,7 +4,8 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 
 ## Features
 
-- GET `/wrapping` endpoint that returns XML with job postings data
+- GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
+- GET `/wrapping/jooble` – XML per Jooble (apply URLs con `utm_source=jooble`); stesso schema, stesso dataset
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -52,7 +53,11 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 
 ### GET /wrapping
 
-Returns XML containing job postings available for LinkedIn wrapping.
+Returns XML with job postings for **LinkedIn** wrapping. Apply URLs are rewritten with `utm_source=linkedin`.
+
+### GET /wrapping/jooble
+
+Returns the same XML format for **Jooble**; apply URLs are rewritten with `utm_source=jooble`. Same data source as `/wrapping`, only the tracking parameter differs.
 
 **Response:**
 ```xml

@@ -9,4 +9,5 @@ router = APIRouter(
 )
 
 router.get("/")(wrapping.get_wrapping)
+router.get("/jooble")(wrapping.get_wrapping_jooble)
 
