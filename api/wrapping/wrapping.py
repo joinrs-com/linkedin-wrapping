@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 
 from utils.database import get_session
-from api.wrapping.service import get_available_job_postings
+from api.wrapping.service import get_available_job_postings, get_jooble_mapping
 from api.platforms.base import rewrite_apply_url_utm_source
 from api.platforms import linkedin as linkedin_platform
 from api.platforms import jooble as jooble_platform
@@ -53,8 +53,17 @@ def _escape_cdata(value: str) -> str:
     return value_str
 
 
-def generate_wrapping_xml(job_postings, *, utm_source: str | None = None) -> str:
-    """Generate XML for wrapping (LinkedIn/Jooble). If utm_source is set, apply URLs are rewritten with that utm_source."""
+def generate_wrapping_xml(
+    job_postings,
+    *,
+    utm_source: str | None = None,
+    apply_url_override: dict[str, str] | None = None,
+) -> str:
+    """
+    Generate XML for wrapping (LinkedIn/Jooble).
+    - If utm_source is set, apply URLs are rewritten with that utm_source (unless overridden).
+    - If apply_url_override is set, it maps partner_job_id -> apply_url and takes precedence for that job.
+    """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
     if last_build_dates:
@@ -70,11 +79,15 @@ def generate_wrapping_xml(job_postings, *, utm_source: str | None = None) -> str
     for job in job_postings:
         # Use partner_job_id if available, fallback to id
         partner_job_id = getattr(job, "partner_job_id", None) or (job.id if getattr(job, "id", None) is not None else "")
+        partner_job_id_str = str(partner_job_id) if partner_job_id is not None else ""
         company = _escape_cdata(getattr(job, "company", None) or "")
         title = _escape_cdata(job.position if getattr(job, "position", None) else "")
         description = _escape_cdata(getattr(job, "description", None) or "")
-        raw_apply_url = getattr(job, "apply_url", None) or ""
-        apply_url = rewrite_apply_url_utm_source(raw_apply_url, utm_source) if utm_source else raw_apply_url
+        if apply_url_override and partner_job_id_str in apply_url_override:
+            apply_url = apply_url_override[partner_job_id_str]
+        else:
+            raw_apply_url = getattr(job, "apply_url", None) or ""
+            apply_url = rewrite_apply_url_utm_source(raw_apply_url, utm_source) if utm_source else raw_apply_url
         apply_url = _escape_cdata(apply_url)
         company_id = _escape_cdata(getattr(job, "company_id", None) or "")
         location = _escape_cdata(getattr(job, "location", None) or "")
@@ -84,8 +97,8 @@ def generate_wrapping_xml(job_postings, *, utm_source: str | None = None) -> str
 
         parts.append(" <job>")
         # partner_job_id is typically numeric, but escape it anyway for safety
-        partner_job_id_str = _escape_cdata(str(partner_job_id))
-        parts.append(f"  <partnerJobId><![CDATA[{partner_job_id_str}]]></partnerJobId>")
+        partner_job_id_escaped = _escape_cdata(partner_job_id_str)
+        parts.append(f"  <partnerJobId><![CDATA[{partner_job_id_escaped}]]></partnerJobId>")
         parts.append(f"  <company><![CDATA[{company}]]></company>")
         parts.append(f"  <title><![CDATA[{title}]]></title>")
         parts.append(f"  <description><![CDATA[{description}]]></description>")
@@ -113,9 +126,18 @@ async def get_wrapping(session: Session = Depends(get_session)) -> Response:
 
 
 async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble endpoint: XML with job postings for Jooble (apply URLs with utm_source=jooble)."""
+    """GET /wrapping/jooble: XML for Jooble; apply URL from job_jooble_mapping (jo_ais_id) when present, else apply_url with utm_source=jooble."""
     job_postings = get_available_job_postings(session)
-    xml_content = generate_wrapping_xml(job_postings, utm_source=jooble_platform.UTM_SOURCE)
+    mapping = get_jooble_mapping(session)
+    apply_url_override = {
+        pid: jooble_platform.build_apply_url_for_jooble(jo_ais_id)
+        for pid, jo_ais_id in mapping.items()
+    }
+    xml_content = generate_wrapping_xml(
+        job_postings,
+        utm_source=jooble_platform.UTM_SOURCE,
+        apply_url_override=apply_url_override if apply_url_override else None,
+    )
     return Response(
         content=xml_content.encode('utf-8'),
         media_type="application/xml; charset=utf-8"
