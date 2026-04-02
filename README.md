@@ -5,7 +5,7 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 ## Features
 
 - GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
-- GET `/wrapping/jooble` – XML per Jooble; apply URL da tabella di mapping `job_jooble_mapping` (jo_ais_id) se presente, altrimenti `apply_url` con `utm_source=jooble`
+- GET `/wrapping/jooble` – XML per Jooble; stessi dati di LinkedIn, `apply_url` con `utm_source=jooble` (stesso link base salvato in `job_postings`)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -57,10 +57,7 @@ Returns XML with job postings for **LinkedIn** wrapping. Apply URLs are rewritte
 
 ### GET /wrapping/jooble
 
-Restituisce lo stesso formato XML per **Jooble**. L’apply URL è:
-- se esiste una riga in `job_jooble_mapping` per quel `partner_job_id`:  
-  `https://www.joinrs.ai/it/jobs/{jo_ais_id}/?utm_source=jooble&utm_medium=job-offer-ats&utm_campaign={jo_ais_id}-scraped`
-- altrimenti: `apply_url` del job con `utm_source=jooble`.
+Restituisce lo stesso formato XML per **Jooble**. L’`apply_url` è quello salvato in `job_postings` (es. `https://www.joinrs.com/it/jobs/{id}/?utm_source=linkedin&...`) con il parametro `utm_source` impostato a **`jooble`**; non serve tabella di mapping.
 
 **Response:**
 ```xml
@@ -109,37 +106,7 @@ The service uses the `lw` schema for job postings:
   - `created_at` (Timestamp)
   - `updated_at` (Timestamp)
 
-### Tabella `job_jooble_mapping` (Jooble)
-
-Mapping `partner_job_id` → `jo_ais_id` per costruire l’apply URL Jooble (`https://www.joinrs.ai/it/jobs/{jo_ais_id}/?...`).
-
-**Colonne:**
-
-| Colonna           | Tipo      | Obbligatorio | Descrizione |
-|-------------------|-----------|--------------|-------------|
-| `id`              | BIGINT PK | Sì           | Chiave primaria auto-increment |
-| `partner_job_id`  | VARCHAR(255) | Sì        | Stesso valore di `job_postings.partner_job_id` (chiave di collegamento) |
-| `jo_ais_id`       | VARCHAR(255) | Sì        | ID usato nell’URL Jooble (es. 58298) |
-| `created_at`      | TIMESTAMP | No           | Default CURRENT_TIMESTAMP |
-
-**Indice unico:** `partner_job_id` (una riga per job).
-
-**Creazione tabella:** usare la migrazione Alembic `0006_job_jooble_mapping` (`alembic upgrade head`) oppure lo script SQL `scripts/create_job_jooble_mapping_table.sql` (MySQL senza schema).
-
-**Popolamento:** inserire una riga per ogni annuncio che deve apparire su Jooble con l’URL joinrs.ai.
-
-Esempio:
-
-```sql
-INSERT INTO job_jooble_mapping (partner_job_id, jo_ais_id) VALUES
-('12345', '58298'),
-('12346', '58299');
-```
-
-- `partner_job_id`: valore presente in `job_postings.partner_job_id` (stesso della tua fonte/query).
-- `jo_ais_id`: ID che vuoi nell’URL (es. da joinrs o da altro sistema). L’URL generato sarà `https://www.joinrs.ai/it/jobs/58298/?utm_source=jooble&utm_medium=job-offer-ats&utm_campaign=58298-scraped`.
-
-Puoi popolare a mano (INSERT o import CSV) o con uno script che legge dalla fonte dove hai già la coppia (partner_job_id, jo_ais_id).
+Se in passato avevi creato la tabella `job_jooble_mapping`, la migrazione Alembic `0007_drop_job_jooble_mapping` la rimuove: esegui `alembic upgrade head`. In alternativa puoi eliminarla manualmente dal database.
 
 ## Deployment
 

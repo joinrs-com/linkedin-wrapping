@@ -155,28 +155,3 @@ def test_wrapping_jooble_empty(client: TestClient):
     assert "<lastBuildDate>" in r.text
 
 
-def test_wrapping_jooble_uses_mapping_url_when_present(client: TestClient):
-    """When job_jooble_mapping has partner_job_id -> jo_ais_id, Jooble XML uses joinrs.ai URL."""
-    _now = datetime.now(timezone.utc)
-    get_sess = list(app.dependency_overrides.values())[0]
-    with next(get_sess()) as s:  # type: ignore
-        job = models.JobPostings(
-            id=1,
-            position="Test",
-            partner_job_id="58298",
-            apply_url="https://example.com/old",
-            created_at=_now,
-            updated_at=_now,
-        )
-        s.add(job)
-        mapping = models.JobJoobleMapping(partner_job_id="58298", jo_ais_id="58298", created_at=_now)
-        s.add(mapping)
-        s.commit()
-
-    r = client.get("/wrapping/jooble")
-    assert r.status_code == 200
-    assert "application/xml" in r.headers.get("content-type", "")
-    assert "https://www.joinrs.ai/it/jobs/58298/?utm_source=jooble" in r.text
-    assert "58298-scraped" in r.text
-
-

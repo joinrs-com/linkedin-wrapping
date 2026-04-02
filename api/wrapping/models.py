@@ -62,19 +62,3 @@ class JobPostingPre(SQLModel, table=True):
         default=None,
         sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP", "onupdate": datetime.now}
     )
-
-
-class JobJoobleMapping(SQLModel, table=True):
-    """
-    Mapping partner_job_id -> jo_ais_id for Jooble apply URL.
-    Apply URL for Jooble: https://www.joinrs.ai/it/jobs/{jo_ais_id}/?utm_source=jooble&utm_medium=job-offer-ats&utm_campaign={jo_ais_id}-scraped
-    """
-    __tablename__ = "job_jooble_mapping"
-    __table_args__ = _resolve_schema()
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    partner_job_id: str
-    jo_ais_id: str
-    created_at: datetime | None = Field(default=None, sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP"})
-
-
