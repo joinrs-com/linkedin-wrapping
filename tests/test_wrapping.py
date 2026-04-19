@@ -155,3 +155,44 @@ def test_wrapping_jooble_empty(client: TestClient):
     assert "<lastBuildDate>" in r.text
 
 
+def test_wrapping_hirematic_empty(client: TestClient):
+    r = client.get("/wrapping/hirematic")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    assert "<source>" in r.text
+    assert "<jobs>" in r.text
+    assert "<jobs_count>0</jobs_count>" in r.text
+
+
+def test_wrapping_hirematic_one_job_body_escaped(client: TestClient):
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        row = models.HirematicJobFeed(
+            id=1,
+            location="Strathroy, Canada",
+            title="Talent Acquisition Manager",
+            city="Strathroy",
+            state="ON",
+            postal_code="N7C",
+            country="Canada",
+            job_type="Full Time",
+            posted_at="2022-04-21",
+            job_reference="1234567890",
+            company="Acme",
+            mobile_friendly_apply="No",
+            category="Human Resources and Personnel",
+            html_jobs="Yes",
+            url="https://example.com/",
+            body="<p>lorem ipsum</p>",
+            cpc="0.000",
+        )
+        s.add(row)
+        s.commit()
+
+    r = client.get("/wrapping/hirematic")
+    assert r.status_code == 200
+    assert "<jobs_count>1</jobs_count>" in r.text
+    assert "&lt;p&gt;lorem ipsum&lt;/p&gt;" in r.text
+    assert "<p>lorem ipsum</p>" not in r.text
+
+

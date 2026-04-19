@@ -1,3 +1,4 @@
+import html
 import re
 from fastapi import Depends, Response
 from sqlmodel import Session
@@ -5,7 +6,7 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 
 from utils.database import get_session
-from api.wrapping.service import get_available_job_postings
+from api.wrapping.service import get_available_job_postings, get_hirematic_job_feed_rows
 from api.platforms.base import rewrite_apply_url_utm_source
 from api.platforms import linkedin as linkedin_platform
 from api.platforms import jooble as jooble_platform
@@ -51,6 +52,57 @@ def _escape_cdata(value: str) -> str:
     value_str = value_str.replace("]]>", "]]]]><![CDATA[>")
     
     return value_str
+
+
+def _appcast_element_text(value: object | None) -> str:
+    """Entity-escaped text for Appcast-style XML (no CDATA), matching Hirematic examples."""
+    if value is None:
+        return ""
+    s = _ensure_utf8(str(value))
+    s = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "", s)
+    return html.escape(s, quote=False)
+
+
+def _format_generation_time_appcast(dt: datetime | None = None) -> str:
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M:%S %z")
+
+
+def generate_hirematic_appcast_xml(rows: list) -> str:
+    """Appcast-compatible XML for Hirematic (see Hirematic feed documentation)."""
+    parts: list[str] = []
+    parts.append('<?xml version="1.0" encoding="UTF-8"?>')
+    parts.append("<source>")
+    parts.append("<jobs>")
+    for job in rows:
+        parts.append("<job>")
+        parts.append(f"<location>{_appcast_element_text(getattr(job, 'location', None))}</location>")
+        parts.append(f"<title>{_appcast_element_text(getattr(job, 'title', None))}</title>")
+        parts.append(f"<city>{_appcast_element_text(getattr(job, 'city', None))}</city>")
+        parts.append(f"<state>{_appcast_element_text(getattr(job, 'state', None))}</state>")
+        parts.append(f"<zip>{_appcast_element_text(getattr(job, 'postal_code', None))}</zip>")
+        parts.append(f"<country>{_appcast_element_text(getattr(job, 'country', None))}</country>")
+        parts.append(f"<job_type>{_appcast_element_text(getattr(job, 'job_type', None))}</job_type>")
+        parts.append(f"<posted_at>{_appcast_element_text(getattr(job, 'posted_at', None))}</posted_at>")
+        parts.append(f"<job_reference>{_appcast_element_text(getattr(job, 'job_reference', None))}</job_reference>")
+        parts.append(f"<company>{_appcast_element_text(getattr(job, 'company', None))}</company>")
+        parts.append(
+            f"<mobile_friendly_apply>{_appcast_element_text(getattr(job, 'mobile_friendly_apply', None))}</mobile_friendly_apply>"
+        )
+        parts.append(f"<category>{_appcast_element_text(getattr(job, 'category', None))}</category>")
+        parts.append(f"<html_jobs>{_appcast_element_text(getattr(job, 'html_jobs', None))}</html_jobs>")
+        parts.append(f"<url>{_appcast_element_text(getattr(job, 'url', None))}</url>")
+        parts.append(f"<body>{_appcast_element_text(getattr(job, 'body', None))}</body>")
+        parts.append(f"<cpc>{_appcast_element_text(getattr(job, 'cpc', None))}</cpc>")
+        parts.append("</job>")
+    parts.append("</jobs>")
+    parts.append(f"<generation_time>{_appcast_element_text(_format_generation_time_appcast())}</generation_time>")
+    parts.append(f"<jobs_count>{len(rows)}</jobs_count>")
+    parts.append("</source>")
+    return "\n".join(parts)
 
 
 def generate_wrapping_xml(job_postings, *, utm_source: str | None = None) -> str:
@@ -120,5 +172,15 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
     return Response(
         content=xml_content.encode('utf-8'),
         media_type="application/xml; charset=utf-8"
+    )
+
+
+async def get_wrapping_hirematic(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/hirematic: Appcast-compatible XML from hirematic_job_feed (URLs as stored, no UTM rewrite)."""
+    rows = get_hirematic_job_feed_rows(session)
+    xml_content = generate_hirematic_appcast_xml(rows)
+    return Response(
+        content=xml_content.encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
     )
 
