@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Column, String, Text
+from sqlalchemy import Column, Date, Numeric, String, Text
 from sqlalchemy.engine.url import make_url
 from sqlmodel import SQLModel, Field
 
@@ -66,25 +66,21 @@ class JobPostingPre(SQLModel, table=True):
 
 
 class HirematicJobFeed(SQLModel, table=True):
-    """Hirematic Appcast feed source; DB column `zip` is exposed as `postal_code` (avoids builtin `zip`)."""
+    """Maps `lw.hirematic_job_feed` (MySQL); column names differ from Appcast XML tags (see wrapping layer)."""
 
     __tablename__ = "hirematic_job_feed"
     __table_args__ = _resolve_schema()
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    location: Optional[str] = Field(default=None)
+    location: Optional[str] = Field(default=None, sa_column=Column("location", Text, nullable=True))
     title: Optional[str] = Field(default=None)
     city: Optional[str] = Field(default=None)
     state: Optional[str] = Field(default=None)
-    postal_code: Optional[str] = Field(default=None, sa_column=Column("zip", String(64), nullable=True))
+    postal_code: Optional[str] = Field(default=None, sa_column=Column("zip", String(20), nullable=True))
     country: Optional[str] = Field(default=None)
-    job_type: Optional[str] = Field(default=None)
-    posted_at: Optional[str] = Field(default=None)
-    job_reference: Optional[str] = Field(default=None)
+    post_date: Optional[date] = Field(default=None, sa_column=Column("post_date", Date, nullable=True))
     company: Optional[str] = Field(default=None)
-    mobile_friendly_apply: Optional[str] = Field(default=None)
     category: Optional[str] = Field(default=None)
-    html_jobs: Optional[str] = Field(default=None)
     url: Optional[str] = Field(default=None)
-    body: Optional[str] = Field(default=None, sa_column=Column("body", Text, nullable=True))
-    cpc: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None, sa_column=Column("description", Text, nullable=True))
+    cpc: Optional[float] = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))

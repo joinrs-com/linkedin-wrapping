@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Generator
 
 import pytest
@@ -175,16 +175,12 @@ def test_wrapping_hirematic_one_job_body_escaped(client: TestClient):
             state="ON",
             postal_code="N7C",
             country="Canada",
-            job_type="Full Time",
-            posted_at="2022-04-21",
-            job_reference="1234567890",
+            post_date=date(2022, 4, 21),
             company="Acme",
-            mobile_friendly_apply="No",
             category="Human Resources and Personnel",
-            html_jobs="Yes",
             url="https://example.com/",
-            body="<p>lorem ipsum</p>",
-            cpc="0.000",
+            description="<p>lorem ipsum</p>",
+            cpc=0.0,
         )
         s.add(row)
         s.commit()
@@ -194,5 +190,7 @@ def test_wrapping_hirematic_one_job_body_escaped(client: TestClient):
     assert "<jobs_count>1</jobs_count>" in r.text
     assert "&lt;p&gt;lorem ipsum&lt;/p&gt;" in r.text
     assert "<p>lorem ipsum</p>" not in r.text
+    assert "<job_reference>1</job_reference>" in r.text
+    assert "<posted_at>2022-04-21</posted_at>" in r.text
 
 

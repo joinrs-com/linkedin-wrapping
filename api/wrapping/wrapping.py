@@ -71,6 +71,16 @@ def _format_generation_time_appcast(dt: datetime | None = None) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S %z")
 
 
+def _appcast_posted_at(job: object) -> str:
+    """DB column `post_date`; Appcast XML tag `posted_at` (YYYY-MM-DD)."""
+    pd = getattr(job, "post_date", None)
+    if pd is None:
+        return ""
+    if hasattr(pd, "isoformat"):
+        return pd.isoformat()
+    return str(pd)
+
+
 def generate_hirematic_appcast_xml(rows: list) -> str:
     """Appcast-compatible XML for Hirematic (see Hirematic feed documentation)."""
     parts: list[str] = []
@@ -78,6 +88,8 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
     parts.append("<source>")
     parts.append("<jobs>")
     for job in rows:
+        jid = getattr(job, "id", None)
+        job_reference = str(jid) if jid is not None else ""
         parts.append("<job>")
         parts.append(f"<location>{_appcast_element_text(getattr(job, 'location', None))}</location>")
         parts.append(f"<title>{_appcast_element_text(getattr(job, 'title', None))}</title>")
@@ -85,17 +97,15 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
         parts.append(f"<state>{_appcast_element_text(getattr(job, 'state', None))}</state>")
         parts.append(f"<zip>{_appcast_element_text(getattr(job, 'postal_code', None))}</zip>")
         parts.append(f"<country>{_appcast_element_text(getattr(job, 'country', None))}</country>")
-        parts.append(f"<job_type>{_appcast_element_text(getattr(job, 'job_type', None))}</job_type>")
-        parts.append(f"<posted_at>{_appcast_element_text(getattr(job, 'posted_at', None))}</posted_at>")
-        parts.append(f"<job_reference>{_appcast_element_text(getattr(job, 'job_reference', None))}</job_reference>")
+        parts.append("<job_type></job_type>")
+        parts.append(f"<posted_at>{_appcast_element_text(_appcast_posted_at(job))}</posted_at>")
+        parts.append(f"<job_reference>{_appcast_element_text(job_reference)}</job_reference>")
         parts.append(f"<company>{_appcast_element_text(getattr(job, 'company', None))}</company>")
-        parts.append(
-            f"<mobile_friendly_apply>{_appcast_element_text(getattr(job, 'mobile_friendly_apply', None))}</mobile_friendly_apply>"
-        )
+        parts.append("<mobile_friendly_apply></mobile_friendly_apply>")
         parts.append(f"<category>{_appcast_element_text(getattr(job, 'category', None))}</category>")
-        parts.append(f"<html_jobs>{_appcast_element_text(getattr(job, 'html_jobs', None))}</html_jobs>")
+        parts.append("<html_jobs></html_jobs>")
         parts.append(f"<url>{_appcast_element_text(getattr(job, 'url', None))}</url>")
-        parts.append(f"<body>{_appcast_element_text(getattr(job, 'body', None))}</body>")
+        parts.append(f"<body>{_appcast_element_text(getattr(job, 'description', None))}</body>")
         parts.append(f"<cpc>{_appcast_element_text(getattr(job, 'cpc', None))}</cpc>")
         parts.append("</job>")
     parts.append("</jobs>")
