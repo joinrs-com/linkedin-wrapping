@@ -115,8 +115,18 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
     return "\n".join(parts)
 
 
-def generate_wrapping_xml(job_postings, *, utm_source: str | None = None) -> str:
-    """Generate XML for wrapping (LinkedIn/Jooble). If utm_source is set, apply URLs get that utm_source."""
+def generate_wrapping_xml(
+    job_postings,
+    *,
+    utm_source: str | None = None,
+    prefer_employers_name_as_company: bool = False,
+) -> str:
+    """
+    Generate XML for wrapping (LinkedIn/Jooble).
+
+    - If utm_source is set, apply URLs get that utm_source.
+    - If prefer_employers_name_as_company is true, <company> uses employers_name when present, else falls back to company.
+    """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
     if last_build_dates:
@@ -133,7 +143,11 @@ def generate_wrapping_xml(job_postings, *, utm_source: str | None = None) -> str
         # Use partner_job_id if available, fallback to id
         partner_job_id = getattr(job, "partner_job_id", None) or (job.id if getattr(job, "id", None) is not None else "")
         partner_job_id_str = str(partner_job_id) if partner_job_id is not None else ""
-        company = _escape_cdata(getattr(job, "company", None) or "")
+        if prefer_employers_name_as_company:
+            company_value = getattr(job, "employers_name", None) or getattr(job, "company", None) or ""
+        else:
+            company_value = getattr(job, "company", None) or ""
+        company = _escape_cdata(company_value)
         title = _escape_cdata(job.position if getattr(job, "position", None) else "")
         description = _escape_cdata(getattr(job, "description", None) or "")
         raw_apply_url = getattr(job, "apply_url", None) or ""
@@ -178,7 +192,11 @@ async def get_wrapping(session: Session = Depends(get_session)) -> Response:
 async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
     """GET /wrapping/jooble: XML for Jooble; same data as LinkedIn, apply_url with utm_source=jooble."""
     job_postings = get_available_job_postings(session)
-    xml_content = generate_wrapping_xml(job_postings, utm_source=jooble_platform.UTM_SOURCE)
+    xml_content = generate_wrapping_xml(
+        job_postings,
+        utm_source=jooble_platform.UTM_SOURCE,
+        prefer_employers_name_as_company=True,
+    )
     return Response(
         content=xml_content.encode('utf-8'),
         media_type="application/xml; charset=utf-8"

@@ -146,6 +146,33 @@ def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
     assert "<applyUrl>" in r.text
 
 
+def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
+    """Jooble endpoint must output <company> from employers_name (fallback to company)."""
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        job = models.JobPostings(
+            id=1,
+            position="Test",
+            company="OldCompany",
+            employers_name="NewEmployer",
+            apply_url="https://example.com/job/1/?utm_source=linkedin&utm_medium=job-offer-ats",
+            created_at=_now,
+            updated_at=_now,
+        )
+        s.add(job)
+        s.commit()
+
+    r = client.get("/wrapping/jooble")
+    assert r.status_code == 200
+    assert "<company><![CDATA[NewEmployer]]></company>" in r.text
+
+    # LinkedIn must remain unchanged: uses `company`
+    r2 = client.get("/wrapping/")
+    assert r2.status_code == 200
+    assert "<company><![CDATA[OldCompany]]></company>" in r2.text
+
+
 def test_wrapping_jooble_empty(client: TestClient):
     """Jooble endpoint with no jobs returns valid XML."""
     r = client.get("/wrapping/jooble")

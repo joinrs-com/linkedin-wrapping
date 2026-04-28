@@ -79,7 +79,6 @@ Per la DESCRIPTION (tutto il testo dopo il summary e prima delle etichette final
 
 Restituisci la job description in HTML e tra un paragrafo e l'altro della description inserisci SEMPRE e SOLO due "<br><br>" consecutivi fuori dai tag <p> per garantire la corretta visualizzazione su LinkedIn Recruiter.
 
-
 Le etichette finali utilizzate sono:
 
  - [#J-REMOTE]
@@ -352,6 +351,8 @@ def process_and_insert_incremental(engine, job_postings: List[JobPostingPre], ba
                     'position': job_pre.position,
                     'job_description': job_pre.job_description,
                     'company': job_pre.company,
+                    'employers_name': getattr(job_pre, "employers_name", None),
+                    'priority': getattr(job_pre, "priority", None),
                     'apply_url': job_pre.apply_url,
                     'company_id': job_pre.company_id,
                     'location': job_pre.location,
@@ -380,6 +381,8 @@ def process_and_insert_incremental(engine, job_postings: List[JobPostingPre], ba
                         position=job_data['position'],
                         description=improved_description,
                         company=job_data['company'],
+                        employers_name=job_data.get('employers_name'),
+                        priority=job_data.get('priority'),
                         apply_url=job_data['apply_url'],
                         company_id=job_data['company_id'],
                         location=job_data['location'],

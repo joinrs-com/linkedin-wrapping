@@ -27,6 +27,8 @@ class JobPostings(SQLModel, table=True):
     position: str
     description: str | None = None
     company: str | None = None
+    employers_name: str | None = None
+    priority: int | None = None
     apply_url: str | None = None
     company_id: str | None = None
     location: str | None = None
@@ -50,6 +52,8 @@ class JobPostingPre(SQLModel, table=True):
     position: str
     job_description: str | None = None
     company: str | None = None
+    employers_name: str | None = None
+    priority: int | None = None
     apply_url: str | None = None
     company_id: str | None = None
     location: str | None = None
