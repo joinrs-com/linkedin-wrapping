@@ -1,0 +1,43 @@
+# Svuota e ricarica job_posting_pre dalla query LinkedIn/Jooble, poi esegue improve_job_descriptions.
+#
+# Orari (schedule in UTC): 04:00 e 13:00 UTC corrispondono a 06:00 e 15:00 in Italia
+# durante l'ora legale (CEST, UTC+2). In inverno (CET) lo stesso cron parte a 05:00 e 14:00 locali;
+# aggiornare il cron a 0 5,14 * * * se servono 6 e 15 fisse tutto l'anno.
+#
+# Secrets richiesti: DATABASE_URL, OPENAI_API_KEY
+# Il runner GitHub deve poter raggiungere il MySQL indicato in DATABASE_URL.
+
+name: LinkedIn Jooble job feed pipeline
+
+on:
+  schedule:
+    - cron: "0 4,13 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: linkedin-jooble-pipeline
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh job_posting_pre and improve descriptions
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python scripts/run_linkedin_jooble_pipeline.py
