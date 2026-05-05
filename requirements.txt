@@ -13,6 +13,8 @@ tenacity>=8.2.0
 httpx==0.27.2
 typing_extensions==4.13.2
 mysql-connector-python==9.3.0
+# Used when DATABASE_URL uses mysql+pymysql:// (GitHub Actions + SQLAlchemy)
+PyMySQL==1.1.1
 pytest==8.3.4
 pytest-asyncio==0.24.0
 
