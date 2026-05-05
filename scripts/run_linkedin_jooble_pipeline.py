@@ -24,6 +24,26 @@ load_dotenv(project_root / ".env" if (project_root / ".env").exists() else None)
 
 import improve_job_descriptions as ijd  # noqa: E402
 
+def _mysql_identifier(name: str) -> str:
+    """Allow only safe MySQL database/schema identifiers (letters, digits, _)."""
+    if not name or not name.replace("_", "").isalnum():
+        raise ValueError(f"Identificatore MySQL non valido: {name!r}")
+    return name
+
+
+def _apply_job_feed_db_qualifiers(sql: str) -> str:
+    """
+    In MySQL `db.table`: il primo segmento è il NOME DEL DATABASE.
+    La query versionata usa job_postings.job_postings_1 e employers.employers;
+    se sul tuo server i cataloghi hanno altri nomi, imposta le env sotto.
+    """
+    jp = _mysql_identifier(os.getenv("JOB_FEED_DB_JOB_POSTINGS", "job_postings"))
+    em = _mysql_identifier(os.getenv("JOB_FEED_DB_EMPLOYERS", "employers"))
+    sql = sql.replace("job_postings.job_postings_1", f"{jp}.job_postings_1")
+    sql = sql.replace("employers.employers", f"{em}.employers")
+    return sql
+
+
 
 def main() -> None:
     if not os.getenv("DATABASE_URL"):
@@ -36,6 +56,7 @@ def main() -> None:
         raise SystemExit(f"File SQL mancante: {sql_path}")
 
     insert_sql = sql_path.read_text(encoding="utf-8")
+    insert_sql = _apply_job_feed_db_qualifiers(insert_sql)
 
     engine = ijd.create_database_engine()
     if engine.dialect.name != "mysql":
