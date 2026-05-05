@@ -1,7 +1,6 @@
--- Opzionale (.env): JOB_FEED_DB_JOB_POSTINGS e JOB_FEED_DB_EMPLOYERS = nome database MySQL
--- dove vivono job_postings_1 e employers (default job_postings / employers).
--- Refresh staging table for LinkedIn + Jooble (replaces manual CSV import).
--- Source: job_postings.job_postings_1 + employers.employers
+-- Opzionale (.env): JOB_FEED_DB_JOB_POSTINGS e JOB_FEED_DB_EMPLOYERS (catalog sulla SORGENTE).
+-- Due RDS diversi: imposta JOB_FEED_SOURCE_DATABASE_URL (production) e DATABASE_URL (lw su intelligence).
+-- Una sola connessione: lascia JOB_FEED_SOURCE_DATABASE_URL vuota e usa solo DATABASE_URL.
 INSERT INTO job_posting_pre (
     position,
     job_description,
