@@ -9,6 +9,24 @@ image: 343417272737.dkr.ecr.eu-central-1.amazonaws.com/linkedin-wrapping-service
 database:
   DATABASE_URL: ""
 
+# Esegue nella VPC del cluster (RDS raggiungibile). Creare il secret OpenAI nel namespace:
+# kubectl create secret generic openai-api-key --from-literal=OPENAI_API_KEY=sk-... -n lw
+jobFeedPipeline:
+  enabled: false
+  suspend: false
+  schedule: "0 4,13 * * *"
+  activeDeadlineSeconds: 7200
+  openaiSecretName: openai-api-key
+  openaiSecretKey: OPENAI_API_KEY
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+
 ingress:
   enabled: true
   host: lw.joinrs.com

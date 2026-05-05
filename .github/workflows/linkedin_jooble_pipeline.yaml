@@ -1,17 +1,14 @@
-# Svuota e ricarica job_posting_pre dalla query LinkedIn/Jooble, poi esegue improve_job_descriptions.
+# Pipeline LinkedIn/Jooble: in produzione lo schedule è sul cluster (CronJob Helm),
+# perché RDS non è raggiungibile da GitHub-hosted runners (timeout rete).
 #
-# Orari (schedule in UTC): 04:00 e 13:00 UTC corrispondono a 06:00 e 15:00 in Italia
-# durante l'ora legale (CEST, UTC+2). In inverno (CET) lo stesso cron parte a 05:00 e 14:00 locali;
-# aggiornare il cron a 0 5,14 * * * se servono 6 e 15 fisse tutto l'anno.
+# Questo workflow resta disponibile solo per test manuali (workflow_dispatch),
+# ad esempio se DATABASE_URL punta a un MySQL pubblicamente raggiungibile.
 #
-# Secrets richiesti: DATABASE_URL, OPENAI_API_KEY
-# Il runner GitHub deve poter raggiungere il MySQL indicato in DATABASE_URL.
+# Secrets: DATABASE_URL, OPENAI_API_KEY (solo per run manuale da qui).
 
 name: LinkedIn Jooble job feed pipeline
 
 on:
-  schedule:
-    - cron: "0 4,13 * * *"
   workflow_dispatch:
 
 concurrency:

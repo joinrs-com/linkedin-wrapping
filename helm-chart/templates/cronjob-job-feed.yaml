@@ -1,0 +1,50 @@
+{{- if .Values.jobFeedPipeline.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: linkedin-jooble-job-feed-pipeline
+  labels:
+    app: linkedin-wrapping-service
+spec:
+  suspend: {{ .Values.jobFeedPipeline.suspend }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  schedule: {{ .Values.jobFeedPipeline.schedule | quote }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.jobFeedPipeline.activeDeadlineSeconds }}
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: linkedin-wrapping-service-job-feed
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: job-feed-pipeline
+              image: {{ .Values.image | quote }}
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - scripts/run_linkedin_jooble_pipeline.py
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-url
+                      key: database-url
+                - name: OPENAI_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.jobFeedPipeline.openaiSecretName | quote }}
+                      key: {{ .Values.jobFeedPipeline.openaiSecretKey | quote }}
+              resources:
+                limits:
+                  cpu: {{ .Values.jobFeedPipeline.resources.limits.cpu | quote }}
+                  memory: {{ .Values.jobFeedPipeline.resources.limits.memory | quote }}
+                requests:
+                  cpu: {{ .Values.jobFeedPipeline.resources.requests.cpu | quote }}
+                  memory: {{ .Values.jobFeedPipeline.resources.requests.memory | quote }}
+{{- end }}
