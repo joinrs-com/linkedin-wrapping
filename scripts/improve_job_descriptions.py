@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 from sqlalchemy import text
+from sqlalchemy.engine.url import make_url
 from sqlmodel import SQLModel, create_engine, Session, select
 
 # Aggiungi il path del progetto per gli import
@@ -20,7 +21,7 @@ from api.wrapping.models import JobPostings, JobPostingPre
 # Carica variabili d'ambiente
 env_path = project_root / ".env"
 if env_path.exists():
-    load_dotenv(env_path)
+    load_dotenv(env_path, override=True)
 
 # Configurazione (caricate all'import, verificate in main())
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -100,12 +101,27 @@ Utilizza solo questi tag html supportati da LinkedIn Recruiter:
 
 def create_database_engine():
     """Crea l'engine del database con configurazione appropriata."""
+    url = DATABASE_URL
+    if not url or not str(url).strip():
+        raise ValueError(
+            "DATABASE_URL mancante o vuota nel .env. "
+            "Esempio: DATABASE_URL=mysql+pymysql://USER:PASSWORD@HOST:3306/NOME_DATABASE"
+        )
+    try:
+        make_url(url)
+    except Exception:
+        raise ValueError(
+            "DATABASE_URL nel .env non è una URL SQLAlchemy valida. "
+            "Usa mysql+pymysql://USER:PASSWORD@HOST:PORT/DATABASE su una sola riga; "
+            "nella password codifica i caratteri speciali con urllib.parse.quote_plus."
+        ) from None
+
     engine = create_engine(
-        DATABASE_URL,
+        url,
         pool_recycle=3600,
         pool_pre_ping=True,
         echo=False,
-        connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+        connect_args={"check_same_thread": False} if "sqlite" in url else {},
     )
     
     # Gestione schema per MySQL

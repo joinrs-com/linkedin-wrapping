@@ -12,6 +12,9 @@ Due server MySQL diversi (es. production lettura + joinrs-intelligence scrittura
     JOB_FEED_DB_JOB_POSTINGS / JOB_FEED_DB_EMPLOYERS → nomi catalog MySQL sulla sorgente
     OPENAI_API_KEY
 
+Il file `.env` nella root del repo viene caricato con priorità sulle variabili già esportate nel terminale,
+così URL DB sbagliati nella shell non oscurano il `.env` corretto.
+
 Comando: python scripts/run_linkedin_jooble_pipeline.py
 """
 
@@ -28,7 +31,10 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "scripts"))
 
-load_dotenv(project_root / ".env" if (project_root / ".env").exists() else None)
+# override=True: il .env del repo deve vincere su variabili già esportate nel terminale (evita URL tronchi).
+_env_file = project_root / ".env"
+if _env_file.is_file():
+    load_dotenv(_env_file, override=True)
 
 import improve_job_descriptions as ijd  # noqa: E402
 

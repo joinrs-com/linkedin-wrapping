@@ -120,12 +120,14 @@ def generate_wrapping_xml(
     *,
     utm_source: str | None = None,
     prefer_employers_name_as_company: bool = False,
+    include_priority: bool = False,
 ) -> str:
     """
     Generate XML for wrapping (LinkedIn/Jooble).
 
     - If utm_source is set, apply URLs get that utm_source.
     - If prefer_employers_name_as_company is true, <company> uses employers_name when present, else falls back to company.
+    - If include_priority is true, outputs <priority> (empty if missing).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
@@ -158,12 +160,16 @@ def generate_wrapping_xml(
         workplace_types = _escape_cdata(getattr(job, "workplace_types", None) or "")
         experience_level = _escape_cdata(getattr(job, "experience_level", None) or "")
         jobtype = _escape_cdata(getattr(job, "jobtype", None) or "")
+        priority_raw = getattr(job, "priority", None)
+        priority = _escape_cdata("" if priority_raw is None else str(priority_raw))
 
         parts.append(" <job>")
         # partner_job_id is typically numeric, but escape it anyway for safety
         partner_job_id_escaped = _escape_cdata(partner_job_id_str)
         parts.append(f"  <partnerJobId><![CDATA[{partner_job_id_escaped}]]></partnerJobId>")
         parts.append(f"  <company><![CDATA[{company}]]></company>")
+        if include_priority:
+            parts.append(f"  <priority><![CDATA[{priority}]]></priority>")
         parts.append(f"  <title><![CDATA[{title}]]></title>")
         parts.append(f"  <description><![CDATA[{description}]]></description>")
         parts.append(f"  <applyUrl><![CDATA[{apply_url}]]></applyUrl>")
@@ -196,6 +202,7 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
         job_postings,
         utm_source=jooble_platform.UTM_SOURCE,
         prefer_employers_name_as_company=True,
+        include_priority=True,
     )
     return Response(
         content=xml_content.encode('utf-8'),
