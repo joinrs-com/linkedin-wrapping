@@ -211,6 +211,7 @@ def test_wrapping_hirematic_one_job_body_escaped(client: TestClient):
             url="https://example.com/",
             description="<p>lorem ipsum</p>",
             cpc=0.0,
+            priority=10,
         )
         s.add(row)
         s.commit()
@@ -222,5 +223,6 @@ def test_wrapping_hirematic_one_job_body_escaped(client: TestClient):
     assert "<p>lorem ipsum</p>" not in r.text
     assert "<job_reference>1</job_reference>" in r.text
     assert "<posted_at>2022-04-21</posted_at>" in r.text
+    assert "<priority>10</priority>" in r.text
 
 

@@ -107,6 +107,7 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
         parts.append(f"<url>{_appcast_element_text(getattr(job, 'url', None))}</url>")
         parts.append(f"<body>{_appcast_element_text(getattr(job, 'description', None))}</body>")
         parts.append(f"<cpc>{_appcast_element_text(getattr(job, 'cpc', None))}</cpc>")
+        parts.append(f"<priority>{_appcast_element_text(getattr(job, 'priority', None))}</priority>")
         parts.append("</job>")
     parts.append("</jobs>")
     parts.append(f"<generation_time>{_appcast_element_text(_format_generation_time_appcast())}</generation_time>")

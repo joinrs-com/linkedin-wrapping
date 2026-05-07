@@ -88,3 +88,4 @@ class HirematicJobFeed(SQLModel, table=True):
     url: Optional[str] = Field(default=None)
     description: Optional[str] = Field(default=None, sa_column=Column("description", Text, nullable=True))
     cpc: Optional[float] = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
+    priority: Optional[int] = Field(default=None)
