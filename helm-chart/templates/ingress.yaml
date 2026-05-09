@@ -18,6 +18,9 @@ metadata:
     {{- if .Values.ingress.group.name }}
     alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group.name }}
     {{- end }}
+    {{- if .Values.ingress.albLoadBalancerAttributes }}
+    alb.ingress.kubernetes.io/load-balancer-attributes: {{ .Values.ingress.albLoadBalancerAttributes | quote }}
+    {{- end }}
 spec:
   rules:
     - host: {{ .Values.ingress.host }}
