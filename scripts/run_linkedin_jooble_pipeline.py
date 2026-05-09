@@ -10,7 +10,7 @@ Due server MySQL diversi (es. production lettura + joinrs-intelligence scrittura
     DATABASE_URL          → host destinazione (lw: job_posting_pre, job_postings)
     JOB_FEED_SOURCE_DATABASE_URL → host sorgente (job_postings DB + employers DB)
     JOB_FEED_DB_JOB_POSTINGS / JOB_FEED_DB_EMPLOYERS → nomi catalog MySQL sulla sorgente
-    OPENAI_API_KEY
+    OPENAI_API_KEY (solo se, dopo il refresh, esistono nuovi annunci che richiedono il miglioramento OpenAI)
 
 Il file `.env` nella root del repo viene caricato con priorità sulle variabili già esportate nel terminale,
 così URL DB sbagliati nella shell non oscurano il `.env` corretto.
@@ -138,8 +138,6 @@ def _refresh_pre_one_server(insert_sql: str) -> None:
 def main() -> None:
     if not os.getenv("DATABASE_URL"):
         raise SystemExit("DATABASE_URL non impostata")
-    if not os.getenv("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY non impostata")
 
     sql_path = project_root / "scripts" / "sql" / "refresh_job_posting_pre_insert.sql"
     if not sql_path.is_file():

@@ -4,9 +4,11 @@ Script per migliorare le job descriptions usando OpenAI e copiarle da job_postin
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 from typing import List
+from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
@@ -26,6 +28,10 @@ if env_path.exists():
 # Configurazione (caricate all'import, verificate in main())
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Solo priority 1–3 passano da OpenAI; employer esclusi mai (anche con priority 1–3).
+OPENAI_PRIORITIES = frozenset({1, 2, 3})
+SKIP_OPENAI_EMPLOYER_IDS = frozenset({829928, 1374217})
 
 # Prompt OpenAI
 OPENAI_PROMPT = """ Il tuo compito è:
@@ -133,6 +139,29 @@ def create_database_engine():
     return engine
 
 
+def parse_employers_id_from_apply_url(url: str | None) -> int | None:
+    """Se utm_medium è '<employers_id>-<priority>', restituisce employers_id; altrimenti None."""
+    if not url or not str(url).strip():
+        return None
+    mediums = parse_qs(urlparse(url.strip()).query).get("utm_medium") or []
+    if not mediums:
+        return None
+    m = re.fullmatch(r"(\d+)-(\d+)", str(mediums[0]).strip())
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def should_enrich_with_openai(*, priority: int | None, apply_url: str | None) -> bool:
+    """True solo per priority 1–3 e employer non in SKIP_OPENAI_EMPLOYER_IDS (da apply_url)."""
+    if priority not in OPENAI_PRIORITIES:
+        return False
+    emp_id = parse_employers_id_from_apply_url(apply_url)
+    if emp_id is not None and emp_id in SKIP_OPENAI_EMPLOYER_IDS:
+        return False
+    return True
+
+
 def truncate_job_postings(session: Session):
     """Trunca la tabella job_postings."""
     print("Truncando tabella job_postings...")
@@ -196,15 +225,25 @@ def get_new_job_postings_to_process(session: Session) -> List[JobPostingPre]:
             # Già presente: skip
             skipped_count += 1
     
+    openai_new = sum(
+        1
+        for j in new_job_postings
+        if should_enrich_with_openai(priority=j.priority, apply_url=j.apply_url)
+    )
+    copy_new = len(new_job_postings) - openai_new
+
     print(f"\n📊 Riepilogo:")
     print(f"  - Totali record in job_posting_pre: {len(all_pre)}")
     print(f"  - Record già processati (da saltare): {skipped_count}")
-    print(f"  - Nuovi record da processare: {len(new_job_postings)}")
-    
+    print(f"  - Nuovi record da inserire in job_postings: {len(new_job_postings)}")
+    if new_job_postings:
+        print(f"      → con miglioramento OpenAI: {openai_new}")
+        print(f"      → copia descrizione senza OpenAI: {copy_new}")
+
     if len(new_job_postings) == 0:
         print("\n✅ Nessun nuovo record da processare. Tutti i record sono già presenti in job_postings.")
     else:
-        print(f"\n🚀 Processerò {len(new_job_postings)} nuovi record.")
+        print(f"\n🚀 Inserimento di {len(new_job_postings)} nuovi record ({openai_new} via OpenAI).")
     
     print("=" * 60 + "\n")
     
@@ -336,121 +375,209 @@ def check_if_already_processed(session: Session, partner_job_id: str | None) -> 
     return result is not None
 
 
+def _job_pre_to_posting_mapping(job_pre: JobPostingPre) -> dict:
+    """Dizionario per bulk_insert_mappings: job_description -> description."""
+    return {
+        "position": job_pre.position,
+        "description": job_pre.job_description,
+        "company": job_pre.company,
+        "employers_name": getattr(job_pre, "employers_name", None),
+        "priority": job_pre.priority,
+        "apply_url": job_pre.apply_url,
+        "company_id": job_pre.company_id,
+        "location": job_pre.location,
+        "workplace_types": job_pre.workplace_types,
+        "experience_level": job_pre.experience_level,
+        "jobtype": job_pre.jobtype,
+        "partner_job_id": job_pre.partner_job_id,
+        "last_build_date": job_pre.last_build_date,
+        "created_at": job_pre.created_at,
+        "updated_at": job_pre.updated_at,
+    }
+
+
+def bulk_insert_copy_only_jobs(
+    engine,
+    jobs: List[JobPostingPre],
+    *,
+    chunk_size: int = 150,
+) -> int:
+    """
+    Inserisce in job_postings le righe senza OpenAI usando bulk_insert_mappings
+    (pochi commit rispetto a un insert per riga).
+    """
+    if not jobs:
+        return 0
+    total = 0
+    n_chunks = (len(jobs) + chunk_size - 1) // chunk_size
+    print(
+        f"Inserimento bulk (copia senza OpenAI): {len(jobs)} righe in {n_chunks} chunk da max {chunk_size}..."
+    )
+    for i in range(0, len(jobs), chunk_size):
+        chunk = jobs[i : i + chunk_size]
+        chunk_num = i // chunk_size + 1
+        mappings = [_job_pre_to_posting_mapping(j) for j in chunk]
+        try:
+            with Session(engine) as session:
+                session.bulk_insert_mappings(JobPostings, mappings)
+                session.commit()
+            total += len(mappings)
+            print(f"  Chunk {chunk_num}/{n_chunks}: inserite {len(mappings)} righe (totale {total}).")
+        except Exception as e:
+            print(f"  ⚠️  Errore bulk chunk {chunk_num}: {e}")
+            for j in chunk:
+                try:
+                    with Session(engine) as s2:
+                        s2.add(
+                            JobPostings(
+                                position=j.position,
+                                description=j.job_description,
+                                company=j.company,
+                                employers_name=getattr(j, "employers_name", None),
+                                priority=j.priority,
+                                apply_url=j.apply_url,
+                                company_id=j.company_id,
+                                location=j.location,
+                                workplace_types=j.workplace_types,
+                                experience_level=j.experience_level,
+                                jobtype=j.jobtype,
+                                partner_job_id=j.partner_job_id,
+                                last_build_date=j.last_build_date,
+                                created_at=j.created_at,
+                                updated_at=j.updated_at,
+                            )
+                        )
+                        s2.commit()
+                    total += 1
+                except Exception as e2:
+                    print(f"  ⚠️  Skip partner_job_id={j.partner_job_id}: {e2}")
+    print(f"  Inserite {total} righe (copia bulk + eventuale fallback per riga).")
+    return total
+
+
+def process_openai_jobs_incremental(engine, jobs: List[JobPostingPre], batch_size: int = 20) -> int:
+    """Solo annunci che richiedono OpenAI: un record alla volta (latenza API)."""
+    if not jobs:
+        return 0
+    print(f"OpenAI: {len(jobs)} annunci da migliorare (log batch {batch_size})...")
+    total_inserted = 0
+    for i in range(0, len(jobs), batch_size):
+        batch = jobs[i : i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(jobs) + batch_size - 1) // batch_size
+        print(f"\n  Batch OpenAI {batch_num}/{total_batches} ({len(batch)} job)...")
+        for job_pre in batch:
+            job_data = {
+                "id": job_pre.id,
+                "partner_job_id": job_pre.partner_job_id,
+                "position": job_pre.position,
+                "job_description": job_pre.job_description,
+                "company": job_pre.company,
+                "employers_name": getattr(job_pre, "employers_name", None),
+                "priority": job_pre.priority,
+                "apply_url": job_pre.apply_url,
+                "company_id": job_pre.company_id,
+                "location": job_pre.location,
+                "workplace_types": job_pre.workplace_types,
+                "experience_level": job_pre.experience_level,
+                "jobtype": job_pre.jobtype,
+                "last_build_date": job_pre.last_build_date,
+                "created_at": job_pre.created_at,
+                "updated_at": job_pre.updated_at,
+            }
+            try:
+                with Session(engine) as session:
+                    print(
+                        f"  🔄 OpenAI Job ID {job_data['id']} "
+                        f"(partner_job_id: {job_data['partner_job_id']})..."
+                    )
+                    improved_description = improve_job_description_with_openai(
+                        job_data["job_description"]
+                    )
+                    job_posting = JobPostings(
+                        position=job_data["position"],
+                        description=improved_description,
+                        company=job_data["company"],
+                        employers_name=job_data.get("employers_name"),
+                        priority=job_data.get("priority"),
+                        apply_url=job_data["apply_url"],
+                        company_id=job_data["company_id"],
+                        location=job_data["location"],
+                        workplace_types=job_data["workplace_types"],
+                        experience_level=job_data["experience_level"],
+                        jobtype=job_data["jobtype"],
+                        partner_job_id=job_data["partner_job_id"],
+                        last_build_date=job_data["last_build_date"],
+                        created_at=job_data["created_at"],
+                        updated_at=job_data["updated_at"],
+                    )
+                    session.add(job_posting)
+                    session.commit()
+                    total_inserted += 1
+            except Exception as e:
+                print(f"  ⚠️  Errore OpenAI Job ID {job_data['id']}: {e}")
+                try:
+                    with Session(engine) as retry_session:
+                        improved_description = improve_job_description_with_openai(
+                            job_data["job_description"]
+                        )
+                        retry_session.add(
+                            JobPostings(
+                                position=job_data["position"],
+                                description=improved_description,
+                                company=job_data["company"],
+                                employers_name=job_data.get("employers_name"),
+                                priority=job_data.get("priority"),
+                                apply_url=job_data["apply_url"],
+                                company_id=job_data["company_id"],
+                                location=job_data["location"],
+                                workplace_types=job_data["workplace_types"],
+                                experience_level=job_data["experience_level"],
+                                jobtype=job_data["jobtype"],
+                                partner_job_id=job_data["partner_job_id"],
+                                last_build_date=job_data["last_build_date"],
+                                created_at=job_data["created_at"],
+                                updated_at=job_data["updated_at"],
+                            )
+                        )
+                        retry_session.commit()
+                        total_inserted += 1
+                except Exception as retry_e:
+                    print(f"  ⚠️  Retry fallito partner_job_id={job_data['partner_job_id']}: {retry_e}")
+    return total_inserted
+
+
 def process_and_insert_incremental(engine, job_postings: List[JobPostingPre], batch_size: int = 20):
     """
-    Processa e inserisce i job postings.
-    NOTA: Questa funzione riceve già solo i nuovi record da processare
-    (filtrati in get_new_job_postings_to_process), quindi non salta più record.
+    Inserisce i nuovi job: prima bulk (copia senza OpenAI), poi uno per uno con OpenAI.
+    Riceve solo record già filtrati da get_new_job_postings_to_process.
     """
-    print(f"Processando {len(job_postings)} nuovi job postings in batch di {batch_size}...")
-    
-    total_processed = 0
-    total_inserted = 0
-    
-    for i in range(0, len(job_postings), batch_size):
-        batch = job_postings[i:i + batch_size]
-        batch_num = (i // batch_size) + 1
-        total_batches = (len(job_postings) + batch_size - 1) // batch_size
-        
-        print(f"\nProcessando batch {batch_num}/{total_batches} ({len(batch)} job postings)...")
-        
-        improved_job_postings = []
-        
-        # Estrai tutti i dati necessari prima di processare (per evitare problemi con oggetti expired)
-        batch_data = []
-        for job_pre in batch:
-            try:
-                # Estrai tutti i dati necessari subito
-                batch_data.append({
-                    'id': job_pre.id,
-                    'partner_job_id': job_pre.partner_job_id,
-                    'position': job_pre.position,
-                    'job_description': job_pre.job_description,
-                    'company': job_pre.company,
-                    'employers_name': getattr(job_pre, "employers_name", None),
-                    'priority': getattr(job_pre, "priority", None),
-                    'apply_url': job_pre.apply_url,
-                    'company_id': job_pre.company_id,
-                    'location': job_pre.location,
-                    'workplace_types': job_pre.workplace_types,
-                    'experience_level': job_pre.experience_level,
-                    'jobtype': job_pre.jobtype,
-                    'last_build_date': job_pre.last_build_date,
-                    'created_at': job_pre.created_at,
-                    'updated_at': job_pre.updated_at,
-                })
-            except Exception as e:
-                print(f"  ⚠️  Errore nell'estrazione dati per Job ID {job_pre.id}: {e}")
-                continue
-        
-        # Processa ogni job con una nuova sessione per ogni record (per evitare che errori blocchino il batch)
-        for job_data in batch_data:
-            try:
-                # Crea una nuova sessione per ogni record per evitare problemi di connessione
-                with Session(engine) as session:
-                    # Migliora la job_description
-                    print(f"  🔄 Processando Job ID {job_data['id']} (partner_job_id: {job_data['partner_job_id']})...")
-                    improved_description = improve_job_description_with_openai(job_data['job_description'])
-                    
-                    # Crea nuovo JobPostings con tutti i campi copiati
-                    job_posting = JobPostings(
-                        position=job_data['position'],
-                        description=improved_description,
-                        company=job_data['company'],
-                        employers_name=job_data.get('employers_name'),
-                        priority=job_data.get('priority'),
-                        apply_url=job_data['apply_url'],
-                        company_id=job_data['company_id'],
-                        location=job_data['location'],
-                        workplace_types=job_data['workplace_types'],
-                        experience_level=job_data['experience_level'],
-                        jobtype=job_data['jobtype'],
-                        partner_job_id=job_data['partner_job_id'],
-                        last_build_date=job_data['last_build_date'],
-                        created_at=job_data['created_at'],
-                        updated_at=job_data['updated_at']
-                    )
-                    
-                    # Inserisci immediatamente il record
-                    try:
-                        session.add(job_posting)
-                        session.commit()
-                        improved_job_postings.append(job_posting)
-                        total_processed += 1
-                        total_inserted += 1
-                    except Exception as e:
-                        print(f"  ⚠️  Errore inserendo Job ID {job_data['id']}: {e}")
-                        session.rollback()
-                        # Prova a inserire con una nuova sessione
-                        try:
-                            with Session(engine) as retry_session:
-                                retry_session.add(job_posting)
-                                retry_session.commit()
-                                improved_job_postings.append(job_posting)
-                                total_processed += 1
-                                total_inserted += 1
-                        except Exception as retry_e:
-                            print(f"  ⚠️  Impossibile inserire Job ID {job_data['id']} anche dopo retry: {retry_e}")
-                            continue
-                    
-            except Exception as e:
-                print(f"  ⚠️  Errore processando Job ID {job_data['id']}: {e}")
-                continue
-        
-        # Mostra riepilogo del batch
-        if improved_job_postings:
-            print(f"  ✅ Batch {batch_num}/{total_batches} completato. Inseriti {len(improved_job_postings)} record.")
-        else:
-            print(f"  ✅ Batch {batch_num}/{total_batches} completato (nessun nuovo record da inserire).")
-        
-        print(f"  📊 Progresso: {total_processed} processati, {total_inserted} inseriti")
-    
+    openai_jobs = [
+        j
+        for j in job_postings
+        if should_enrich_with_openai(priority=j.priority, apply_url=j.apply_url)
+    ]
+    copy_jobs = [
+        j
+        for j in job_postings
+        if not should_enrich_with_openai(priority=j.priority, apply_url=j.apply_url)
+    ]
+
     print(f"\n{'='*60}")
-    print(f"Riepilogo processamento:")
-    print(f"  - Totali processati: {total_processed}")
-    print(f"  - Totali inseriti: {total_inserted}")
+    print(f"Nuovi da inserire: {len(job_postings)} (copia bulk: {len(copy_jobs)}, OpenAI: {len(openai_jobs)})")
     print(f"{'='*60}")
-    
+
+    n_copy = bulk_insert_copy_only_jobs(engine, copy_jobs, chunk_size=150)
+    n_openai = process_openai_jobs_incremental(engine, openai_jobs, batch_size=batch_size)
+    total_inserted = n_copy + n_openai
+
+    print(f"\n{'='*60}")
+    print("Riepilogo processamento:")
+    print(f"  - Inseriti (copia bulk): {n_copy}")
+    print(f"  - Inseriti (OpenAI): {n_openai}")
+    print(f"  - Totale: {total_inserted}")
+    print(f"{'='*60}")
+
     return total_inserted
 
 
@@ -524,12 +651,9 @@ def main():
     print("Script di miglioramento job descriptions")
     print("=" * 60)
     
-    # Verifica configurazione
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY non trovata nel file .env")
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL non trovata nel file .env")
-    
+
     try:
         # Crea engine e sessione
         engine = create_database_engine()
@@ -559,7 +683,17 @@ def main():
                 print(f"  📊 Nuovi record processati: 0")
                 print("=" * 60)
                 return
-            
+
+            needs_openai = any(
+                should_enrich_with_openai(priority=j.priority, apply_url=j.apply_url)
+                for j in new_job_postings
+            )
+            if needs_openai and not (OPENAI_API_KEY and str(OPENAI_API_KEY).strip()):
+                raise ValueError(
+                    "OPENAI_API_KEY non trovata nel file .env "
+                    "(necessaria: almeno un nuovo annuncio richiede il miglioramento via OpenAI)."
+                )
+
             # 3. Processa e inserisci solo i nuovi record
             # Passa engine invece di session per creare nuove sessioni per ogni batch
             processed_count = process_and_insert_incremental(engine, new_job_postings, batch_size=20)

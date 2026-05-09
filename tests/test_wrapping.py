@@ -101,14 +101,17 @@ def test_wrapping_endpoint_with_jobs(client: TestClient):
 
 
 def test_wrapping_linkedin_apply_url_has_utm_source_linkedin(client: TestClient):
-    """LinkedIn endpoint must output applyUrl with utm_source=linkedin."""
+    """LinkedIn XML: utm_source=linkedin and utm_medium=job-offer-ats (canonical DB URL uses employer-priority in medium)."""
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         job = models.JobPostings(
             id=1,
             position="Test",
-            apply_url="https://example.com/job/1/?utm_source=jooble&utm_medium=job-offer-ats",
+            apply_url=(
+                "https://www.joinrs.com/jobs/1/"
+                "?utm_source=linkedin&utm_medium=12345-3&utm_campaign=1-pro"
+            ),
             created_at=_now,
             updated_at=_now,
         )
@@ -118,20 +121,25 @@ def test_wrapping_linkedin_apply_url_has_utm_source_linkedin(client: TestClient)
     r = client.get("/wrapping/")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
-    # LinkedIn endpoint rewrites apply URL to utm_source=linkedin
     assert "utm_source=linkedin" in r.text
+    assert "utm_medium=job-offer-ats" in r.text
+    assert "utm_campaign=1-pro" in r.text
+    assert "utm_medium=12345-3" not in r.text
     assert "<applyUrl>" in r.text
 
 
 def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
-    """Jooble endpoint must output applyUrl with utm_source=jooble."""
+    """Jooble XML: utm_source=jooble; utm_medium stays employers_id-priority from DB."""
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         job = models.JobPostings(
             id=1,
             position="Test",
-            apply_url="https://example.com/job/1/?utm_source=linkedin&utm_medium=job-offer-ats",
+            apply_url=(
+                "https://www.joinrs.com/jobs/1/"
+                "?utm_source=linkedin&utm_medium=12345-3&utm_campaign=1-pro"
+            ),
             created_at=_now,
             updated_at=_now,
         )
@@ -143,6 +151,8 @@ def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<source>" in r.text
     assert "utm_source=jooble" in r.text
+    assert "utm_medium=12345-3" in r.text
+    assert "utm_campaign=1-pro" in r.text
     assert "<applyUrl>" in r.text
 
 
@@ -157,7 +167,10 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
             company="OldCompany",
             employers_name="NewEmployer",
             priority=3,
-            apply_url="https://example.com/job/1/?utm_source=linkedin&utm_medium=job-offer-ats",
+            apply_url=(
+                "https://www.joinrs.com/jobs/1/"
+                "?utm_source=linkedin&utm_medium=99-3&utm_campaign=1-pro"
+            ),
             created_at=_now,
             updated_at=_now,
         )

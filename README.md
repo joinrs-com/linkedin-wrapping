@@ -89,10 +89,21 @@ Root endpoint with service information.
 
 ## Testing
 
-Run unit tests:
+I test automatici vivono solo in [`tests/`](tests/). La root del repo contiene [`pytest.ini`](pytest.ini) con `testpaths = tests`, così `pytest` non raccoglie file sotto `scripts/` anche se il nome assomiglia a un test.
+
+Esegui la suite da root:
+
 ```bash
-pytest tests/ -v
+python3 -m pytest
 ```
+
+Equivalente esplicito:
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+**Demo manuale OpenAI** (non è un test pytest; richiede `.env` con DB e chiave): `python3 scripts/demo_improve_job_descriptions.py`
 
 Test HTTP endpoints using `test_wrapping.http` file.
 

@@ -69,6 +69,7 @@ location_agg AS (
 prepared AS (
     SELECT
         jp.id,
+        jp.employers_id,
         jp.position,
         jp.description,
         jp.url,
@@ -223,9 +224,14 @@ SELECT
     CONCAT(
         'https://www.joinrs.com/jobs/',
         n.id,
-        '/?utm_source=linkedin&utm_medium=job-offer-ats&utm_campaign=',
+        '/?utm_source=linkedin&utm_medium=',
+        n.employers_id,
+        '-',
+        n.priority,
+        '&utm_campaign=',
         n.id,
-        '-', n.product, '-', n.priority
+        '-',
+        n.product
     ) AS apply_url,
     '3807356' AS company_id,
     CASE
@@ -249,9 +255,12 @@ SELECT
 
 FROM normalized n
 WHERE
-    n.has_ita = 1
-    AND n.product IN ('pro', 'one')
-    AND n.priority IN (1, 2, 3)
+    (
+        n.has_ita = 1
+        AND n.product IN ('pro', 'one')
+        AND n.priority IN (1, 2, 3, 4)
+    )
+    OR n.employers_id IN (829928, 1374217)
 
 ORDER BY
     n.priority ASC,

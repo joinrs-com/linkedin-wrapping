@@ -7,9 +7,10 @@ from email.utils import format_datetime
 
 from utils.database import get_session
 from api.wrapping.service import get_available_job_postings, get_hirematic_job_feed_rows
-from api.platforms.base import rewrite_apply_url_utm_source
-from api.platforms import linkedin as linkedin_platform
-from api.platforms import jooble as jooble_platform
+from api.platforms.base import (
+    rewrite_apply_url_for_jooble_feed,
+    rewrite_apply_url_for_linkedin_feed,
+)
 
 
 def _format_rfc1123_gmt(dt: datetime | None = None) -> str:
@@ -119,14 +120,14 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
 def generate_wrapping_xml(
     job_postings,
     *,
-    utm_source: str | None = None,
+    apply_url_mode: str,
     prefer_employers_name_as_company: bool = False,
     include_priority: bool = False,
 ) -> str:
     """
     Generate XML for wrapping (LinkedIn/Jooble).
 
-    - If utm_source is set, apply URLs get that utm_source.
+    - apply_url_mode: 'linkedin' (utm_medium=job-offer-ats in XML) or 'jooble' (utm_source=jooble, medium unchanged).
     - If prefer_employers_name_as_company is true, <company> uses employers_name when present, else falls back to company.
     - If include_priority is true, outputs <priority> (empty if missing).
     """
@@ -154,7 +155,12 @@ def generate_wrapping_xml(
         title = _escape_cdata(job.position if getattr(job, "position", None) else "")
         description = _escape_cdata(getattr(job, "description", None) or "")
         raw_apply_url = getattr(job, "apply_url", None) or ""
-        apply_url = rewrite_apply_url_utm_source(raw_apply_url, utm_source) if utm_source else raw_apply_url
+        if apply_url_mode == "linkedin":
+            apply_url = rewrite_apply_url_for_linkedin_feed(raw_apply_url)
+        elif apply_url_mode == "jooble":
+            apply_url = rewrite_apply_url_for_jooble_feed(raw_apply_url)
+        else:
+            raise ValueError(f"apply_url_mode must be 'linkedin' or 'jooble', got {apply_url_mode!r}")
         apply_url = _escape_cdata(apply_url)
         company_id = _escape_cdata(getattr(job, "company_id", None) or "")
         location = _escape_cdata(getattr(job, "location", None) or "")
@@ -189,7 +195,7 @@ def generate_wrapping_xml(
 async def get_wrapping(session: Session = Depends(get_session)) -> Response:
     """GET /wrapping endpoint: XML with job postings for LinkedIn (apply URLs with utm_source=linkedin)."""
     job_postings = get_available_job_postings(session)
-    xml_content = generate_wrapping_xml(job_postings, utm_source=linkedin_platform.UTM_SOURCE)
+    xml_content = generate_wrapping_xml(job_postings, apply_url_mode="linkedin")
     return Response(
         content=xml_content.encode('utf-8'),
         media_type="application/xml; charset=utf-8"
@@ -201,7 +207,7 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
     job_postings = get_available_job_postings(session)
     xml_content = generate_wrapping_xml(
         job_postings,
-        utm_source=jooble_platform.UTM_SOURCE,
+        apply_url_mode="jooble",
         prefer_employers_name_as_company=True,
         include_priority=True,
     )
