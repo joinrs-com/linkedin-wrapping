@@ -43,6 +43,7 @@ JOB_POSTING_PRE_COLUMNS = [
     "job_description",
     "company",
     "employers_name",
+    "employers_id",
     "priority",
     "apply_url",
     "company_id",

@@ -35,6 +35,33 @@ def rewrite_apply_url_for_jooble_feed(url: str | None) -> str:
     return _set_query_params(url, {"utm_source": JOOBLE_UTM_SOURCE})
 
 
+def rewrite_apply_url_for_jooble_feed_with_job(
+    url: str | None,
+    *,
+    employers_id: int | None,
+    priority: int | None,
+) -> str:
+    """
+    Jooble XML: utm_source=jooble. If stored utm_medium is job-offer-ats but employers_id and
+    priority are present, rebuild utm_medium as '<employers_id>-<priority>' (canonical tracking).
+    """
+    if not url or not str(url).strip():
+        return url or ""
+    parsed = urlparse(url.strip())
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    mediums = query.get("utm_medium") or []
+    medium0 = str(mediums[0]).strip() if mediums else ""
+    if (
+        medium0 == LINKEDIN_FEED_UTM_MEDIUM
+        and employers_id is not None
+        and priority is not None
+    ):
+        query["utm_medium"] = [f"{int(employers_id)}-{int(priority)}"]
+    query["utm_source"] = [JOOBLE_UTM_SOURCE]
+    new_query = urlencode(query, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
+
+
 def rewrite_apply_url_utm_source(url: str | None, utm_source: str) -> str:
     """
     Set or replace utm_source in the query string of an apply URL.

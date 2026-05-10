@@ -156,6 +156,36 @@ def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
     assert "<applyUrl>" in r.text
 
 
+def test_wrapping_jooble_rebuilds_medium_when_db_has_job_offer_ats_and_employers_id(
+    client: TestClient,
+):
+    """Jooble: if apply_url still has job-offer-ats but employers_id+priority exist, rebuild medium."""
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        job = models.JobPostings(
+            id=1,
+            position="Test",
+            apply_url=(
+                "https://www.joinrs.com/jobs/2921081/"
+                "?utm_source=linkedin&utm_medium=job-offer-ats&utm_campaign=2921081-pro"
+            ),
+            employers_id=2341296,
+            priority=1,
+            created_at=_now,
+            updated_at=_now,
+        )
+        s.add(job)
+        s.commit()
+
+    r = client.get("/wrapping/jooble")
+    assert r.status_code == 200
+    assert "utm_source=jooble" in r.text
+    assert "utm_medium=2341296-1" in r.text
+    assert "utm_campaign=2921081-pro" in r.text
+    assert "job-offer-ats" not in r.text
+
+
 def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
     """Jooble endpoint must output <company> from employers_name (fallback to company)."""
     _now = datetime.now(timezone.utc)

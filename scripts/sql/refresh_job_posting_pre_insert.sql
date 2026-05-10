@@ -6,6 +6,7 @@ INSERT INTO job_posting_pre (
     job_description,
     company,
     employers_name,
+    employers_id,
     priority,
     apply_url,
     company_id,
@@ -220,6 +221,7 @@ SELECT
     ) AS job_description,
     'Joinrs' AS company,
     n.employer_name AS employers_name,
+    n.employers_id AS employers_id,
     n.priority AS priority,
     CONCAT(
         'https://www.joinrs.com/jobs/',

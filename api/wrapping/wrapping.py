@@ -9,6 +9,7 @@ from utils.database import get_session
 from api.wrapping.service import get_available_job_postings, get_hirematic_job_feed_rows
 from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
+    rewrite_apply_url_for_jooble_feed_with_job,
     rewrite_apply_url_for_linkedin_feed,
 )
 
@@ -158,7 +159,11 @@ def generate_wrapping_xml(
         if apply_url_mode == "linkedin":
             apply_url = rewrite_apply_url_for_linkedin_feed(raw_apply_url)
         elif apply_url_mode == "jooble":
-            apply_url = rewrite_apply_url_for_jooble_feed(raw_apply_url)
+            apply_url = rewrite_apply_url_for_jooble_feed_with_job(
+                raw_apply_url,
+                employers_id=getattr(job, "employers_id", None),
+                priority=getattr(job, "priority", None),
+            )
         else:
             raise ValueError(f"apply_url_mode must be 'linkedin' or 'jooble', got {apply_url_mode!r}")
         apply_url = _escape_cdata(apply_url)
