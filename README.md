@@ -5,7 +5,7 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 ## Features
 
 - GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
-- GET `/wrapping/jooble` – XML per Jooble; stessi dati di LinkedIn, `apply_url` con `utm_source=jooble` (stesso link base salvato in `job_postings`)
+- GET `/wrapping/jooble` – XML per Jooble; `apply_url` senza parametri query (link canonico del job; Jooble aggiunge i propri UTM)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -57,7 +57,7 @@ Returns XML with job postings for **LinkedIn** wrapping. Apply URLs are rewritte
 
 ### GET /wrapping/jooble
 
-Restituisce lo stesso formato XML per **Jooble**. L’`apply_url` è quello salvato in `job_postings` (es. `https://www.joinrs.com/it/jobs/{id}/?utm_source=linkedin&...`) con il parametro `utm_source` impostato a **`jooble`**; non serve tabella di mapping.
+Restituisce lo stesso formato XML per **Jooble**. L’`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`); Jooble aggiunge i propri parametri UTM al click.
 
 **Response:**
 ```xml

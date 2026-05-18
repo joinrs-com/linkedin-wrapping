@@ -8,7 +8,7 @@ GET http://localhost:3000/
 ### Get Wrapping – LinkedIn (apply URLs con utm_source=linkedin)
 GET http://localhost:3000/wrapping
 
-### Get Wrapping – Jooble (apply URLs con utm_source=jooble)
+### Get Wrapping – Jooble (apply URLs senza query params)
 GET http://localhost:3000/wrapping/jooble
 
 ### Get Wrapping – Hirematic (Appcast XML da hirematic_job_feed)

@@ -1,7 +1,6 @@
 """Shared helpers for platform-specific export (e.g. apply URL tracking)."""
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-from api.platforms.jooble import UTM_SOURCE as JOOBLE_UTM_SOURCE
 from api.platforms.linkedin import LINKEDIN_FEED_UTM_MEDIUM, UTM_SOURCE as LINKEDIN_UTM_SOURCE
 
 
@@ -28,38 +27,23 @@ def rewrite_apply_url_for_linkedin_feed(url: str | None) -> str:
 
 def rewrite_apply_url_for_jooble_feed(url: str | None) -> str:
     """
-    Jooble XML: utm_source=jooble; utm_medium and utm_campaign stay as stored (employers_id-priority).
+    Jooble XML: apply URL without query or fragment (e.g. https://www.joinrs.com/jobs/3218063).
+    Jooble adds its own UTM parameters on click-through.
     """
     if not url or not url.strip():
         return url or ""
-    return _set_query_params(url, {"utm_source": JOOBLE_UTM_SOURCE})
-
-
-def rewrite_apply_url_for_jooble_feed_with_job(
-    url: str | None,
-    *,
-    employers_id: int | None,
-    priority: int | None,
-) -> str:
-    """
-    Jooble XML: utm_source=jooble. If stored utm_medium is job-offer-ats but employers_id and
-    priority are present, rebuild utm_medium as '<employers_id>-<priority>' (canonical tracking).
-    """
-    if not url or not str(url).strip():
-        return url or ""
     parsed = urlparse(url.strip())
-    query = parse_qs(parsed.query, keep_blank_values=True)
-    mediums = query.get("utm_medium") or []
-    medium0 = str(mediums[0]).strip() if mediums else ""
-    if (
-        medium0 == LINKEDIN_FEED_UTM_MEDIUM
-        and employers_id is not None
-        and priority is not None
-    ):
-        query["utm_medium"] = [f"{int(employers_id)}-{int(priority)}"]
-    query["utm_source"] = [JOOBLE_UTM_SOURCE]
-    new_query = urlencode(query, doseq=True)
-    return urlunparse(parsed._replace(query=new_query))
+    path = parsed.path.rstrip("/") or "/"
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            path,
+            parsed.params,
+            "",
+            "",
+        )
+    )
 
 
 def rewrite_apply_url_utm_source(url: str | None, utm_source: str) -> str:

@@ -128,8 +128,8 @@ def test_wrapping_linkedin_apply_url_has_utm_source_linkedin(client: TestClient)
     assert "<applyUrl>" in r.text
 
 
-def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
-    """Jooble XML: utm_source=jooble; utm_medium stays employers_id-priority from DB."""
+def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
+    """Jooble XML: apply URL is canonical job link without query (Jooble adds UTMs)."""
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
@@ -150,40 +150,9 @@ def test_wrapping_jooble_apply_url_has_utm_source_jooble(client: TestClient):
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<source>" in r.text
-    assert "utm_source=jooble" in r.text
-    assert "utm_medium=12345-3" in r.text
-    assert "utm_campaign=1-pro" in r.text
+    assert "<applyUrl><![CDATA[https://www.joinrs.com/jobs/1]]></applyUrl>" in r.text
+    assert "utm_" not in r.text.split("<applyUrl>")[1].split("</applyUrl>")[0]
     assert "<applyUrl>" in r.text
-
-
-def test_wrapping_jooble_rebuilds_medium_when_db_has_job_offer_ats_and_employers_id(
-    client: TestClient,
-):
-    """Jooble: if apply_url still has job-offer-ats but employers_id+priority exist, rebuild medium."""
-    _now = datetime.now(timezone.utc)
-    get_sess = list(app.dependency_overrides.values())[0]
-    with next(get_sess()) as s:  # type: ignore
-        job = models.JobPostings(
-            id=1,
-            position="Test",
-            apply_url=(
-                "https://www.joinrs.com/jobs/2921081/"
-                "?utm_source=linkedin&utm_medium=job-offer-ats&utm_campaign=2921081-pro"
-            ),
-            employers_id=2341296,
-            priority=1,
-            created_at=_now,
-            updated_at=_now,
-        )
-        s.add(job)
-        s.commit()
-
-    r = client.get("/wrapping/jooble")
-    assert r.status_code == 200
-    assert "utm_source=jooble" in r.text
-    assert "utm_medium=2341296-1" in r.text
-    assert "utm_campaign=2921081-pro" in r.text
-    assert "job-offer-ats" not in r.text
 
 
 def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
