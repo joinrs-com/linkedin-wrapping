@@ -165,6 +165,7 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
             position="Test",
             company="OldCompany",
             employers_name="NewEmployer",
+            employers_id=2341296,
             priority=3,
             apply_url=(
                 "https://www.joinrs.com/jobs/1/"
@@ -180,12 +181,14 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
     assert r.status_code == 200
     assert "<company><![CDATA[NewEmployer]]></company>" in r.text
     assert "<priority><![CDATA[3]]></priority>" in r.text
+    assert "<employers_id><![CDATA[2341296]]></employers_id>" in r.text
 
     # LinkedIn must remain unchanged: uses `company`
     r2 = client.get("/wrapping/")
     assert r2.status_code == 200
     assert "<company><![CDATA[OldCompany]]></company>" in r2.text
     assert "<priority>" not in r2.text
+    assert "<employers_id>" not in r2.text
 
 
 def test_wrapping_jooble_empty(client: TestClient):

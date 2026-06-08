@@ -123,6 +123,7 @@ def generate_wrapping_xml(
     apply_url_mode: str,
     prefer_employers_name_as_company: bool = False,
     include_priority: bool = False,
+    include_employers_id: bool = False,
 ) -> str:
     """
     Generate XML for wrapping (LinkedIn/Jooble).
@@ -130,6 +131,7 @@ def generate_wrapping_xml(
     - apply_url_mode: 'linkedin' (utm_medium=job-offer-ats in XML) or 'jooble' (apply URL without query params).
     - If prefer_employers_name_as_company is true, <company> uses employers_name when present, else falls back to company.
     - If include_priority is true, outputs <priority> (empty if missing).
+    - If include_employers_id is true, outputs <employers_id> from job_postings.employers_id (Jooble only).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
@@ -169,6 +171,8 @@ def generate_wrapping_xml(
         jobtype = _escape_cdata(getattr(job, "jobtype", None) or "")
         priority_raw = getattr(job, "priority", None)
         priority = _escape_cdata("" if priority_raw is None else str(priority_raw))
+        employers_id_raw = getattr(job, "employers_id", None)
+        employers_id = _escape_cdata("" if employers_id_raw is None else str(employers_id_raw))
 
         parts.append(" <job>")
         # partner_job_id is typically numeric, but escape it anyway for safety
@@ -177,6 +181,8 @@ def generate_wrapping_xml(
         parts.append(f"  <company><![CDATA[{company}]]></company>")
         if include_priority:
             parts.append(f"  <priority><![CDATA[{priority}]]></priority>")
+        if include_employers_id:
+            parts.append(f"  <employers_id><![CDATA[{employers_id}]]></employers_id>")
         parts.append(f"  <title><![CDATA[{title}]]></title>")
         parts.append(f"  <description><![CDATA[{description}]]></description>")
         parts.append(f"  <applyUrl><![CDATA[{apply_url}]]></applyUrl>")
@@ -210,6 +216,7 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
         apply_url_mode="jooble",
         prefer_employers_name_as_company=True,
         include_priority=True,
+        include_employers_id=True,
     )
     return Response(
         content=xml_content.encode('utf-8'),
