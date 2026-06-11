@@ -11,6 +11,9 @@ GET http://localhost:3000/wrapping
 ### Get Wrapping – Jooble (apply URLs senza query params)
 GET http://localhost:3000/wrapping/jooble
 
+### Get Wrapping – Jooble abroad (enterprise multi-paese, jooble_abroad_job_feed)
+GET http://localhost:3000/wrapping/jooble/abroad
+
 ### Get Wrapping – Hirematic (Appcast XML da hirematic_job_feed)
 GET http://localhost:3000/wrapping/hirematic
 

@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 
 from utils.database import get_session
-from api.wrapping.service import get_available_job_postings, get_hirematic_job_feed_rows
+from api.wrapping.service import (
+    get_available_job_postings,
+    get_hirematic_job_feed_rows,
+    get_jooble_abroad_job_feed_rows,
+)
 from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
     rewrite_apply_url_for_linkedin_feed,
@@ -124,6 +128,7 @@ def generate_wrapping_xml(
     prefer_employers_name_as_company: bool = False,
     include_priority: bool = False,
     include_employers_id: bool = False,
+    include_countries: bool = False,
 ) -> str:
     """
     Generate XML for wrapping (LinkedIn/Jooble).
@@ -132,6 +137,7 @@ def generate_wrapping_xml(
     - If prefer_employers_name_as_company is true, <company> uses employers_name when present, else falls back to company.
     - If include_priority is true, outputs <priority> (empty if missing).
     - If include_employers_id is true, outputs <employers_id> from job_postings.employers_id (Jooble only).
+    - If include_countries is true, outputs <countries> after <location> (Jooble abroad feed only).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
@@ -166,6 +172,7 @@ def generate_wrapping_xml(
         apply_url = _escape_cdata(apply_url)
         company_id = _escape_cdata(getattr(job, "company_id", None) or "")
         location = _escape_cdata(getattr(job, "location", None) or "")
+        countries = _escape_cdata(getattr(job, "countries", None) or "")
         workplace_types = _escape_cdata(getattr(job, "workplace_types", None) or "")
         experience_level = _escape_cdata(getattr(job, "experience_level", None) or "")
         jobtype = _escape_cdata(getattr(job, "jobtype", None) or "")
@@ -188,6 +195,8 @@ def generate_wrapping_xml(
         parts.append(f"  <applyUrl><![CDATA[{apply_url}]]></applyUrl>")
         parts.append(f"  <companyId> <![CDATA[{company_id}]]></companyId>")
         parts.append(f"  <location><![CDATA[{location}]]></location>")
+        if include_countries:
+            parts.append(f"  <countries><![CDATA[{countries}]]></countries>")
         parts.append(f"  <workplaceTypes><![CDATA[{workplace_types}]]></workplaceTypes>")
         parts.append(f"  <experienceLevel><![CDATA[{experience_level}]]></experienceLevel>")
         parts.append(f"  <jobtype><![CDATA[{jobtype}]]></jobtype>")
@@ -221,6 +230,23 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
     return Response(
         content=xml_content.encode('utf-8'),
         media_type="application/xml; charset=utf-8"
+    )
+
+
+async def get_wrapping_jooble_abroad(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/jooble/abroad: Jooble XML for enterprise jobs abroad (jooble_abroad_job_feed)."""
+    rows = get_jooble_abroad_job_feed_rows(session)
+    xml_content = generate_wrapping_xml(
+        rows,
+        apply_url_mode="jooble",
+        prefer_employers_name_as_company=True,
+        include_priority=True,
+        include_employers_id=True,
+        include_countries=True,
+    )
+    return Response(
+        content=xml_content.encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
     )
 
 

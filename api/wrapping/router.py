@@ -10,5 +10,6 @@ router = APIRouter(
 
 router.get("/")(wrapping.get_wrapping)
 router.get("/jooble")(wrapping.get_wrapping_jooble)
+router.get("/jooble/abroad")(wrapping.get_wrapping_jooble_abroad)
 router.get("/hirematic")(wrapping.get_wrapping_hirematic)
 

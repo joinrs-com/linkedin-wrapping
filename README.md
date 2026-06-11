@@ -6,6 +6,7 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 
 - GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
 - GET `/wrapping/jooble` – XML per Jooble; `apply_url` senza parametri query (link canonico del job; Jooble aggiunge i propri UTM)
+- GET `/wrapping/jooble/abroad` – XML Jooble separato per annunci enterprise all'estero (`jooble_abroad_job_feed`, refresh manuale)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -78,6 +79,24 @@ Restituisce lo stesso formato XML per **Jooble**. L’`apply_url` è il link can
   </job>
   <!-- more <job> entries -->
 ```
+
+### GET /wrapping/jooble/abroad
+
+Feed Jooble **separato** per annunci enterprise con location non solo in Italia. Legge da `lw.jooble_abroad_job_feed` (refresh manuale giornaliero, come Hirematic).
+
+Stesso schema XML di `/wrapping/jooble`, con in più `<priority>`, `<employers_id>` e `<countries>`. La description è pre-formattata in SQL (non passa da OpenAI).
+
+**Refresh manuale:**
+
+```bash
+# 1. Svuota tabella
+mysql ... < scripts/sql/jooble_abroad_job_feed_truncate.sql
+
+# 2. Esegui SELECT ed importa in lw.jooble_abroad_job_feed
+# scripts/sql/jooble_abroad_job_feed_select.sql
+```
+
+Dopo `alembic upgrade head` la tabella viene creata automaticamente.
 
 ### GET /health
 

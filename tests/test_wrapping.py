@@ -182,6 +182,7 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
     assert "<company><![CDATA[NewEmployer]]></company>" in r.text
     assert "<priority><![CDATA[3]]></priority>" in r.text
     assert "<employers_id><![CDATA[2341296]]></employers_id>" in r.text
+    assert "<countries>" not in r.text
 
     # LinkedIn must remain unchanged: uses `company`
     r2 = client.get("/wrapping/")
@@ -198,6 +199,62 @@ def test_wrapping_jooble_empty(client: TestClient):
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<source>" in r.text
     assert "<lastBuildDate>" in r.text
+
+
+def test_wrapping_jooble_abroad_empty(client: TestClient):
+    """Jooble abroad endpoint with no jobs returns valid XML."""
+    r = client.get("/wrapping/jooble/abroad")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    assert "<source>" in r.text
+    assert "<lastBuildDate>" in r.text
+
+
+def test_wrapping_jooble_abroad_one_job(client: TestClient):
+    """Jooble abroad: countries, employers_id, apply URL without query params."""
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        row = models.JoobleAbroadJobFeed(
+            id=3218063,
+            position="Software Engineer",
+            employers_name="Acme Corp",
+            employers_id=589893,
+            priority=2,
+            description="<p>Enterprise role abroad</p>",
+            company="Joinrs",
+            apply_url=(
+                "https://www.joinrs.com/jobs/3218063/"
+                "?utm_source=linkedin&utm_medium=589893-2&utm_campaign=3218063-pro"
+            ),
+            company_id="829928",
+            location="Multi-country",
+            countries="DEU, FRA, ITA",
+            workplace_types="Remote",
+            experience_level="Mid Level",
+            jobtype="Full Time",
+            partner_job_id="3218063",
+            last_build_date=_now,
+        )
+        s.add(row)
+        s.commit()
+
+    r = client.get("/wrapping/jooble/abroad")
+    assert r.status_code == 200
+    assert "<company><![CDATA[Acme Corp]]></company>" in r.text
+    assert "<priority><![CDATA[2]]></priority>" in r.text
+    assert "<employers_id><![CDATA[589893]]></employers_id>" in r.text
+    assert "<countries><![CDATA[DEU, FRA, ITA]]></countries>" in r.text
+    assert "<applyUrl><![CDATA[https://www.joinrs.com/jobs/3218063]]></applyUrl>" in r.text
+    assert "utm_" not in r.text.split("<applyUrl>")[1].split("</applyUrl>")[0]
+
+    r2 = client.get("/wrapping/jooble")
+    assert r2.status_code == 200
+    assert "<countries>" not in r2.text
+
+    r3 = client.get("/wrapping/")
+    assert r3.status_code == 200
+    assert "<countries>" not in r3.text
 
 
 def test_wrapping_hirematic_empty(client: TestClient):
