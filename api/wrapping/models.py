@@ -93,6 +93,30 @@ class HirematicJobFeed(SQLModel, table=True):
     priority: Optional[int] = Field(default=None)
 
 
+class JoobleJobFeed(SQLModel, table=True):
+    """Maps `lw.jooble_job_feed`; manual daily refresh for Jooble main feed (non-Italy EU jobs)."""
+
+    __tablename__ = "jooble_job_feed"
+    __table_args__ = _resolve_schema()
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    position: str
+    employers_name: str | None = None
+    employers_id: int | None = None
+    priority: int | None = None
+    description: str | None = Field(default=None, sa_column=Column("description", Text, nullable=True))
+    company: str | None = None
+    apply_url: str | None = None
+    company_id: str | None = None
+    location: str | None = Field(default=None, sa_column=Column("location", Text, nullable=True))
+    countries: str | None = Field(default=None, sa_column=Column("countries", Text, nullable=True))
+    workplace_types: str | None = None
+    experience_level: str | None = None
+    jobtype: str | None = None
+    partner_job_id: str | None = None
+    last_build_date: datetime | None = None
+
+
 class JoobleAbroadJobFeed(SQLModel, table=True):
     """Maps `lw.jooble_abroad_job_feed`; manual daily refresh for Jooble enterprise abroad feed."""
 

@@ -8,7 +8,7 @@ GET http://localhost:3000/
 ### Get Wrapping – LinkedIn (apply URLs con utm_source=linkedin)
 GET http://localhost:3000/wrapping
 
-### Get Wrapping – Jooble (apply URLs senza query params)
+### Get Wrapping – Jooble (jooble_job_feed, refresh manuale)
 GET http://localhost:3000/wrapping/jooble
 
 ### Get Wrapping – Jooble abroad (enterprise multi-paese, jooble_abroad_job_feed)

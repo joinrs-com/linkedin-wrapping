@@ -10,6 +10,7 @@ from api.wrapping.service import (
     get_available_job_postings,
     get_hirematic_job_feed_rows,
     get_jooble_abroad_job_feed_rows,
+    get_jooble_job_feed_rows,
 )
 from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
@@ -218,10 +219,10 @@ async def get_wrapping(session: Session = Depends(get_session)) -> Response:
 
 
 async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble: XML for Jooble; apply_url is the canonical job link without query params."""
-    job_postings = get_available_job_postings(session)
+    """GET /wrapping/jooble: XML from jooble_job_feed; apply_url is the canonical job link without query params."""
+    rows = get_jooble_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
-        job_postings,
+        rows,
         apply_url_mode="jooble",
         prefer_employers_name_as_company=True,
         include_priority=True,

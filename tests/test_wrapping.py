@@ -133,17 +133,13 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
-        job = models.JobPostings(
+        row = models.JoobleJobFeed(
             id=1,
             position="Test",
-            apply_url=(
-                "https://www.joinrs.com/jobs/1/"
-                "?utm_source=linkedin&utm_medium=12345-3&utm_campaign=1-pro"
-            ),
-            created_at=_now,
-            updated_at=_now,
+            apply_url="https://www.joinrs.com/jobs/1",
+            last_build_date=_now,
         )
-        s.add(job)
+        s.add(row)
         s.commit()
 
     r = client.get("/wrapping/jooble")
@@ -155,26 +151,66 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
     assert "<applyUrl>" in r.text
 
 
+def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: TestClient):
+    """Jooble main feed uses jooble_job_feed only; job_postings rows are ignored."""
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        s.add(
+            models.JobPostings(
+                id=99,
+                position="Only LinkedIn",
+                created_at=_now,
+                updated_at=_now,
+            )
+        )
+        s.add(
+            models.JoobleJobFeed(
+                id=1,
+                position="Only Jooble",
+                apply_url="https://www.joinrs.com/jobs/1",
+                last_build_date=_now,
+            )
+        )
+        s.commit()
+
+    r = client.get("/wrapping/jooble")
+    assert r.status_code == 200
+    assert "<![CDATA[Only Jooble]]>" in r.text
+    assert "Only LinkedIn" not in r.text
+
+    r2 = client.get("/wrapping/")
+    assert r2.status_code == 200
+    assert "<![CDATA[Only LinkedIn]]>" in r2.text
+    assert "Only Jooble" not in r2.text
+
+
 def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
     """Jooble endpoint must output <company> from employers_name (fallback to company)."""
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
-        job = models.JobPostings(
-            id=1,
-            position="Test",
-            company="OldCompany",
-            employers_name="NewEmployer",
-            employers_id=2341296,
-            priority=3,
-            apply_url=(
-                "https://www.joinrs.com/jobs/1/"
-                "?utm_source=linkedin&utm_medium=99-3&utm_campaign=1-pro"
-            ),
-            created_at=_now,
-            updated_at=_now,
+        s.add(
+            models.JobPostings(
+                id=1,
+                position="LinkedIn Job",
+                company="OldCompany",
+                created_at=_now,
+                updated_at=_now,
+            )
         )
-        s.add(job)
+        s.add(
+            models.JoobleJobFeed(
+                id=1,
+                position="Test",
+                company="Joinrs",
+                employers_name="NewEmployer",
+                employers_id=2341296,
+                priority=3,
+                apply_url="https://www.joinrs.com/jobs/1",
+                last_build_date=_now,
+            )
+        )
         s.commit()
 
     r = client.get("/wrapping/jooble")

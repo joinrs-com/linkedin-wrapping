@@ -5,7 +5,7 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 ## Features
 
 - GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
-- GET `/wrapping/jooble` – XML per Jooble; `apply_url` senza parametri query (link canonico del job; Jooble aggiunge i propri UTM)
+- GET `/wrapping/jooble` – XML Jooble principale da `jooble_job_feed` (annunci non-Italia EU, refresh manuale, no OpenAI)
 - GET `/wrapping/jooble/abroad` – XML Jooble separato per annunci enterprise all'estero (`jooble_abroad_job_feed`, refresh manuale)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
@@ -58,7 +58,17 @@ Returns XML with job postings for **LinkedIn** wrapping. Apply URLs are rewritte
 
 ### GET /wrapping/jooble
 
-Restituisce lo stesso formato XML per **Jooble**. L’`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`); Jooble aggiunge i propri parametri UTM al click.
+Feed Jooble **principale**. Legge da `lw.jooble_job_feed` (annunci non-Italia in ESP/POR/FRA/DEU/GBR/BEL), popolata manualmente con la query in `scripts/sql/jooble_job_feed_select.sql`. La description è pre-formattata in SQL (non passa da OpenAI).
+
+L'`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`).
+
+**Refresh manuale:**
+
+```bash
+mysql ... lw < scripts/sql/jooble_job_feed_truncate.sql
+# Esegui SELECT ed importa in lw.jooble_job_feed
+# scripts/sql/jooble_job_feed_select.sql
+```
 
 **Response:**
 ```xml
