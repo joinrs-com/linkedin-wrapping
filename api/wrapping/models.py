@@ -139,3 +139,27 @@ class JoobleAbroadJobFeed(SQLModel, table=True):
     jobtype: str | None = None
     partner_job_id: str | None = None
     last_build_date: datetime | None = None
+
+
+class WhatjobsJobFeed(SQLModel, table=True):
+    """Maps `lw.whatjobs_job_feed`; manual daily refresh for WhatJobs Italy feed."""
+
+    __tablename__ = "whatjobs_job_feed"
+    __table_args__ = _resolve_schema()
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    link: str = Field(sa_column=Column("link", Text, nullable=False))
+    name: str
+    region: str = Field(sa_column=Column("region", Text, nullable=False))
+    remote: str | None = None
+    salary: str | None = None
+    description: str = Field(sa_column=Column("description", Text, nullable=False))
+    company: str
+    company_logo: str | None = Field(default=None, sa_column=Column("company_logo", Text, nullable=True))
+    pubdate: str
+    updated: str
+    expire: str
+    jobtype: str
+    employers_id: int | None = None
+    priority: int | None = None
+    experience_level: str | None = None

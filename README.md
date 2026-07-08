@@ -7,6 +7,7 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 - GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
 - GET `/wrapping/jooble` – XML Jooble principale da `jooble_job_feed` (annunci non-Italia EU, refresh manuale, no OpenAI)
 - GET `/wrapping/jooble/abroad` – XML Jooble separato per annunci enterprise all'estero (`jooble_abroad_job_feed`, refresh manuale)
+- GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia, refresh manuale, no OpenAI)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -107,6 +108,38 @@ mysql ... < scripts/sql/jooble_abroad_job_feed_truncate.sql
 ```
 
 Dopo `alembic upgrade head` la tabella viene creata automaticamente.
+
+### GET /wrapping/whatjobs
+
+Feed **WhatJobs** per annunci in Italia (priority 1–5). Legge da `lw.whatjobs_job_feed`, popolata manualmente con la query in `scripts/sql/whatjobs_job_feed_select.sql`. La description è pre-formattata in SQL (non passa da OpenAI).
+
+Il `link` è il URL canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`). Formato XML WhatJobs con tag `link`, `name`, `region`, `description`, `company`, ecc. in sezioni CDATA.
+
+**Refresh manuale:**
+
+```bash
+mysql ... lw < scripts/sql/whatjobs_job_feed_truncate.sql
+# Esegui SELECT ed importa in lw.whatjobs_job_feed
+# scripts/sql/whatjobs_job_feed_select.sql
+```
+
+**Response:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<jobs>
+  <job id="3218063">
+    <link><![CDATA[https://www.joinrs.com/jobs/3218063]]></link>
+    <name><![CDATA[Software Engineer]]></name>
+    <region><![CDATA[Milan - Italy]]></region>
+    <description><![CDATA[<p>...</p>]]></description>
+    <company><![CDATA[Acme Corp]]></company>
+    <pubdate><![CDATA[01.06.2026]]></pubdate>
+    <updated><![CDATA[08.06.2026]]></updated>
+    <expire><![CDATA[31.07.2026]]></expire>
+    <jobtype><![CDATA[full-time]]></jobtype>
+  </job>
+</jobs>
+```
 
 ### GET /health
 

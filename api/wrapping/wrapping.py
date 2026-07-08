@@ -11,6 +11,7 @@ from api.wrapping.service import (
     get_hirematic_job_feed_rows,
     get_jooble_abroad_job_feed_rows,
     get_jooble_job_feed_rows,
+    get_whatjobs_job_feed_rows,
 )
 from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
@@ -119,6 +120,44 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
     parts.append(f"<generation_time>{_appcast_element_text(_format_generation_time_appcast())}</generation_time>")
     parts.append(f"<jobs_count>{len(rows)}</jobs_count>")
     parts.append("</source>")
+    return "\n".join(parts)
+
+
+def _whatjobs_cdata_lines(tag: str, value: object | None, *, required: bool = False) -> list[str]:
+    """Return XML lines for a WhatJobs CDATA tag; omit optional tags when empty."""
+    if value is None:
+        text = ""
+    else:
+        text = str(value).strip()
+    if not required and not text:
+        return []
+    escaped = _escape_cdata(text)
+    return [f"    <{tag}><![CDATA[{escaped}]]></{tag}>"]
+
+
+def generate_whatjobs_xml(rows: list) -> str:
+    """WhatJobs-compatible XML (see https://www.whatjobs.com/xml-feed-specification)."""
+    parts: list[str] = []
+    parts.append('<?xml version="1.0" encoding="UTF-8"?>')
+    parts.append("<jobs>")
+    for job in rows:
+        jid = getattr(job, "id", None)
+        job_id = html.escape(str(jid) if jid is not None else "", quote=True)
+        parts.append(f'  <job id="{job_id}">')
+        parts.extend(_whatjobs_cdata_lines("link", getattr(job, "link", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("name", getattr(job, "name", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("region", getattr(job, "region", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("remote", getattr(job, "remote", None)))
+        parts.extend(_whatjobs_cdata_lines("salary", getattr(job, "salary", None)))
+        parts.extend(_whatjobs_cdata_lines("description", getattr(job, "description", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("company", getattr(job, "company", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("company_logo", getattr(job, "company_logo", None)))
+        parts.extend(_whatjobs_cdata_lines("pubdate", getattr(job, "pubdate", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("updated", getattr(job, "updated", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("expire", getattr(job, "expire", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("jobtype", getattr(job, "jobtype", None), required=True))
+        parts.append("  </job>")
+    parts.append("</jobs>")
     return "\n".join(parts)
 
 
@@ -255,6 +294,16 @@ async def get_wrapping_hirematic(session: Session = Depends(get_session)) -> Res
     """GET /wrapping/hirematic: Appcast-compatible XML from hirematic_job_feed (URLs as stored, no UTM rewrite)."""
     rows = get_hirematic_job_feed_rows(session)
     xml_content = generate_hirematic_appcast_xml(rows)
+    return Response(
+        content=xml_content.encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/whatjobs: WhatJobs XML from whatjobs_job_feed (URLs as stored, no UTM rewrite)."""
+    rows = get_whatjobs_job_feed_rows(session)
+    xml_content = generate_whatjobs_xml(rows)
     return Response(
         content=xml_content.encode("utf-8"),
         media_type="application/xml; charset=utf-8",

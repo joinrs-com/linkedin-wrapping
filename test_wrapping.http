@@ -17,3 +17,6 @@ GET http://localhost:3000/wrapping/jooble/abroad
 ### Get Wrapping – Hirematic (Appcast XML da hirematic_job_feed)
 GET http://localhost:3000/wrapping/hirematic
 
+### Get Wrapping – WhatJobs (XML da whatjobs_job_feed, refresh manuale)
+GET http://localhost:3000/wrapping/whatjobs
+

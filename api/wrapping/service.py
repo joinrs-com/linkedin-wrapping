@@ -1,7 +1,14 @@
+from sqlalchemy import asc, desc
 from sqlmodel import Session, select
 from typing import List
 
-from api.wrapping.models import HirematicJobFeed, JobPostings, JoobleAbroadJobFeed, JoobleJobFeed
+from api.wrapping.models import (
+    HirematicJobFeed,
+    JobPostings,
+    JoobleAbroadJobFeed,
+    JoobleJobFeed,
+    WhatjobsJobFeed,
+)
 
 
 def get_available_job_postings(session: Session) -> List[JobPostings]:
@@ -31,5 +38,15 @@ def get_jooble_job_feed_rows(session: Session) -> List[JoobleJobFeed]:
 def get_jooble_abroad_job_feed_rows(session: Session) -> List[JoobleAbroadJobFeed]:
     """All rows from jooble_abroad_job_feed for Jooble enterprise abroad XML export."""
     statement = select(JoobleAbroadJobFeed)
+    results = session.exec(statement)
+    return list(results.all())
+
+
+def get_whatjobs_job_feed_rows(session: Session) -> List[WhatjobsJobFeed]:
+    """All rows from whatjobs_job_feed for WhatJobs XML export."""
+    statement = select(WhatjobsJobFeed).order_by(
+        asc(WhatjobsJobFeed.priority),
+        desc(WhatjobsJobFeed.pubdate),
+    )
     results = session.exec(statement)
     return list(results.all())

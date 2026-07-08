@@ -334,3 +334,119 @@ def test_wrapping_hirematic_one_job_body_escaped(client: TestClient):
     assert "<priority>10</priority>" in r.text
 
 
+def test_wrapping_whatjobs_empty(client: TestClient):
+    r = client.get("/wrapping/whatjobs")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    assert "<jobs>" in r.text
+    assert "</jobs>" in r.text
+    assert "<source>" not in r.text
+
+
+def test_wrapping_whatjobs_one_job_cdata_and_tags(client: TestClient):
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        row = models.WhatjobsJobFeed(
+            id=3218063,
+            link="https://www.joinrs.com/jobs/3218063",
+            name="Software Engineer",
+            region="Milan - Italy",
+            remote="Hybrid",
+            salary="25000-29000 EUR",
+            description="<p>Role with ]]> edge case</p>",
+            company="Acme Corp",
+            company_logo="https://example.com/logo.png",
+            pubdate="01.06.2026",
+            updated="08.06.2026",
+            expire="31.07.2026",
+            jobtype="full-time",
+            employers_id=589893,
+            priority=2,
+            experience_level="Mid Level",
+        )
+        s.add(row)
+        s.commit()
+
+    r = client.get("/wrapping/whatjobs")
+    assert r.status_code == 200
+    assert '<job id="3218063">' in r.text
+    assert "<link><![CDATA[https://www.joinrs.com/jobs/3218063]]></link>" in r.text
+    assert "<name><![CDATA[Software Engineer]]></name>" in r.text
+    assert "<region><![CDATA[Milan - Italy]]></region>" in r.text
+    assert "<remote><![CDATA[Hybrid]]></remote>" in r.text
+    assert "<salary><![CDATA[25000-29000 EUR]]></salary>" in r.text
+    assert "<company><![CDATA[Acme Corp]]></company>" in r.text
+    assert "<jobtype><![CDATA[full-time]]></jobtype>" in r.text
+    assert "]]]]><![CDATA[>" in r.text
+    assert "<employers_id>" not in r.text
+    assert "<priority>" not in r.text
+    assert "<experience_level>" not in r.text
+
+
+def test_wrapping_whatjobs_omits_empty_optional_tags(client: TestClient):
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        row = models.WhatjobsJobFeed(
+            id=1,
+            link="https://www.joinrs.com/jobs/1",
+            name="Intern",
+            region="Rome - Italy",
+            remote="",
+            salary=None,
+            description="<p>Desc</p>",
+            company="Acme",
+            company_logo="",
+            pubdate="01.06.2026",
+            updated="08.06.2026",
+            expire="31.07.2026",
+            jobtype="full-time",
+        )
+        s.add(row)
+        s.commit()
+
+    r = client.get("/wrapping/whatjobs")
+    assert r.status_code == 200
+    assert "<remote>" not in r.text
+    assert "<salary>" not in r.text
+    assert "<company_logo>" not in r.text
+
+
+def test_wrapping_whatjobs_reads_from_table_not_job_postings(client: TestClient):
+    _now = datetime.now(timezone.utc)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        s.add(
+            models.JobPostings(
+                id=99,
+                position="Only LinkedIn",
+                created_at=_now,
+                updated_at=_now,
+            )
+        )
+        s.add(
+            models.WhatjobsJobFeed(
+                id=1,
+                link="https://www.joinrs.com/jobs/1",
+                name="Only WhatJobs",
+                region="Turin - Italy",
+                description="<p>Test</p>",
+                company="Employer",
+                pubdate="01.06.2026",
+                updated="08.06.2026",
+                expire="31.07.2026",
+                jobtype="full-time",
+            )
+        )
+        s.commit()
+
+    r = client.get("/wrapping/whatjobs")
+    assert r.status_code == 200
+    assert "<![CDATA[Only WhatJobs]]>" in r.text
+    assert "Only LinkedIn" not in r.text
+
+    r2 = client.get("/wrapping/")
+    assert r2.status_code == 200
+    assert "<![CDATA[Only LinkedIn]]>" in r2.text
+    assert "Only WhatJobs" not in r2.text
+
+
