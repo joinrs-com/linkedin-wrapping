@@ -7,6 +7,8 @@ import os
 import re
 import sys
 from pathlib import Path
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import List
 from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
@@ -18,7 +20,7 @@ from sqlmodel import SQLModel, create_engine, Session, select
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from api.wrapping.models import JobPostings, JobPostingPre
+from api.wrapping.models import JobDescriptionEnriched, JobPostings, JobPostingPre
 
 # Carica variabili d'ambiente
 env_path = project_root / ".env"
@@ -32,6 +34,19 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # Solo priority 1–3 passano da OpenAI; employer esclusi mai (anche con priority 1–3).
 OPENAI_PRIORITIES = frozenset({1, 2, 3})
 SKIP_OPENAI_EMPLOYER_IDS = frozenset({829928, 1374217})
+
+
+class OpenAIEnrichmentError(Exception):
+    """OpenAI API failure during strict enrichment; pipeline must abort."""
+
+    def __init__(self, message: str, *, cause: Exception | None = None):
+        super().__init__(message)
+        self.cause = cause
+
+
+def _wrap_openai_error(exc: Exception) -> OpenAIEnrichmentError:
+    return OpenAIEnrichmentError(f"OpenAI enrichment failed: {exc}", cause=exc)
+
 
 # Prompt OpenAI
 OPENAI_PROMPT = """ Il tuo compito è:
@@ -101,6 +116,8 @@ assicurati che siano visualizzate correttamente a fine description se presenti.
 Utilizza solo questi tag html supportati da LinkedIn Recruiter:
  <b>, <strong> Bold/Strong <u> Underline <i> italic <br> Line Break <p> Paragraph <ul> Unordered List <li> Ordered List <em> Emphasized text(italics)
 
+IMPORTANTE: non usare mai Markdown (niente **, __, #, o elenchi con - / * come marker). Solo tag HTML.
+
 
 """
 
@@ -152,14 +169,117 @@ def parse_employers_id_from_apply_url(url: str | None) -> int | None:
     return int(m.group(1))
 
 
-def should_enrich_with_openai(*, priority: int | None, apply_url: str | None) -> bool:
-    """True solo per priority 1–3 e employer non in SKIP_OPENAI_EMPLOYER_IDS (da apply_url)."""
+def should_enrich_with_openai(
+    *,
+    priority: int | None,
+    has_ita: int | None = None,
+    employers_id: int | None = None,
+    apply_url: str | None = None,
+) -> bool:
+    """True solo per priority 1–3, Italia, employer non in SKIP_OPENAI_EMPLOYER_IDS."""
     if priority not in OPENAI_PRIORITIES:
         return False
-    emp_id = parse_employers_id_from_apply_url(apply_url)
-    if emp_id is not None and emp_id in SKIP_OPENAI_EMPLOYER_IDS:
+    if has_ita is not None and int(has_ita) != 1:
+        return False
+    emp_id = employers_id
+    if emp_id is None and apply_url:
+        emp_id = parse_employers_id_from_apply_url(apply_url)
+    if emp_id is not None and int(emp_id) in SKIP_OPENAI_EMPLOYER_IDS:
         return False
     return True
+
+
+@dataclass
+class EnrichmentResult:
+    processed: int
+    deleted: int
+    total: int
+    eligible_active: int
+
+
+def run_enrichment_pipeline(
+    enrichment_inputs: list[dict],
+    *,
+    engine=None,
+    batch_size: int = 20,
+) -> EnrichmentResult:
+    """
+    OpenAI enrichment for NEW eligible jobs only.
+    Writes to job_description_enriched; never re-processes existing job_id.
+    """
+    if engine is None:
+        engine = create_database_engine()
+
+    eligible_ids = {
+        int(row["job_id"])
+        for row in enrichment_inputs
+        if should_enrich_with_openai(
+            priority=row.get("priority"),
+            has_ita=row.get("has_ita"),
+            employers_id=row.get("employers_id"),
+        )
+    }
+
+    with Session(engine) as session:
+        existing_rows = session.exec(select(JobDescriptionEnriched)).all()
+        existing_ids = {int(r.job_id) for r in existing_rows}
+
+        stale_ids = existing_ids - eligible_ids
+        deleted = 0
+        if stale_ids:
+            for job_id in stale_ids:
+                row = session.get(JobDescriptionEnriched, job_id)
+                if row:
+                    session.delete(row)
+            session.commit()
+            deleted = len(stale_ids)
+            print(f"Rimossi {deleted} job scaduti/non eleggibili da job_description_enriched.")
+
+        to_enrich = [
+            row
+            for row in enrichment_inputs
+            if int(row["job_id"]) in eligible_ids and int(row["job_id"]) not in existing_ids
+        ]
+
+        if to_enrich and not (OPENAI_API_KEY and str(OPENAI_API_KEY).strip()):
+            raise ValueError(
+                "OPENAI_API_KEY non trovata nel .env "
+                f"({len(to_enrich)} nuovi job richiedono OpenAI)."
+            )
+
+        processed = 0
+        if to_enrich:
+            print(f"OpenAI: {len(to_enrich)} nuovi job da arricchire...")
+            print("Verifica API key OpenAI (probe)...")
+            improve_job_description_with_openai("<p>probe</p>", strict=True)
+
+            for i, row in enumerate(to_enrich, 1):
+                job_id = int(row["job_id"])
+                input_html = row.get("input_description") or ""
+                improved = improve_job_description_with_openai(input_html, strict=True)
+                session.add(
+                    JobDescriptionEnriched(
+                        job_id=job_id,
+                        description=improved or input_html,
+                        priority=row.get("priority"),
+                        has_ita=row.get("has_ita"),
+                        employers_id=row.get("employers_id"),
+                        enriched_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    )
+                )
+                session.commit()
+                processed += 1
+                if i % batch_size == 0 or i == len(to_enrich):
+                    print(f"  Arricchiti {processed}/{len(to_enrich)} job.")
+
+        total = session.exec(select(JobDescriptionEnriched)).all()
+        return EnrichmentResult(
+            processed=processed,
+            deleted=deleted,
+            total=len(total),
+            eligible_active=len(eligible_ids),
+        )
+
 
 
 def truncate_job_postings(session: Session):
@@ -334,16 +454,24 @@ def remove_expired_job_postings(session: Session):
     return len(expired_postings)
 
 
-def improve_job_description_with_openai(job_description: str | None) -> str | None:
-    """Migliora una job description usando OpenAI."""
+def improve_job_description_with_openai(
+    job_description: str | None,
+    *,
+    strict: bool = False,
+) -> str | None:
+    """Migliora una job description usando OpenAI.
+
+    strict=False (default): su errore API restituisce la description originale (legacy main).
+    strict=True: su errore API solleva OpenAIEnrichmentError (pipeline incrementale).
+    """
     if not job_description:
         return None
-    
+
     try:
         from openai import OpenAI
-        
+
         client = OpenAI(api_key=OPENAI_API_KEY)
-        
+
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
@@ -357,12 +485,13 @@ def improve_job_description_with_openai(job_description: str | None) -> str | No
                 }
             ]
         )
-        
+
         improved_description = response.choices[0].message.content.strip()
         return improved_description
     except Exception as e:
+        if strict:
+            raise _wrap_openai_error(e) from e
         print(f"Errore durante il miglioramento con OpenAI: {e}")
-        # In caso di errore, restituisci la descrizione originale
         return job_description
 
 

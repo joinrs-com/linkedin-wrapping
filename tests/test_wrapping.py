@@ -237,6 +237,64 @@ def test_wrapping_jooble_empty(client: TestClient):
     assert "<lastBuildDate>" in r.text
 
 
+def test_wrapping_talent_empty(client: TestClient):
+    """Talent endpoint mirrors Jooble feed XML."""
+    r = client.get("/wrapping/talent")
+    assert r.status_code == 200
+    assert "application/xml" in r.headers.get("content-type", "")
+    assert "<source>" in r.text
+    assert "<lastBuildDate>" in r.text
+
+
+def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
+    """Talent converts Markdown to allowed HTML; Jooble keeps raw description."""
+    raw = (
+        "<p>**Talenti** ricerca:</p>\n"
+        "## Requisiti\n"
+        "- Esperienza\n"
+        "- Propensione\n"
+        '<p style="color:red"><b>Note</b></p>'
+    )
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        s.add(
+            models.JoobleJobFeed(
+                id=900001,
+                position="Operator",
+                employers_name="Talenti",
+                employers_id=1,
+                priority=2,
+                description=raw,
+                company="Joinrs",
+                apply_url="https://www.joinrs.com/jobs/900001",
+                company_id="829928",
+                location="Italy",
+                countries="ITA",
+                workplace_types="On-site",
+                experience_level="Entry Level",
+                jobtype="Full Time",
+                partner_job_id="900001",
+                last_build_date=datetime.now(timezone.utc),
+            )
+        )
+        s.commit()
+
+    talent = client.get("/wrapping/talent")
+    jooble = client.get("/wrapping/jooble")
+    assert talent.status_code == 200
+    assert jooble.status_code == 200
+
+    assert "**" not in talent.text
+    assert "<strong>Talenti</strong>" in talent.text
+    assert "<strong>Requisiti</strong>" in talent.text
+    assert "<li>Esperienza</li>" in talent.text
+    assert "<strong>Note</strong>" in talent.text
+    assert "style=" not in talent.text
+
+    # Jooble unchanged (still has markdown markers from DB)
+    assert "**Talenti**" in jooble.text
+
+
 def test_wrapping_jooble_abroad_empty(client: TestClient):
     """Jooble abroad endpoint with no jobs returns valid XML."""
     r = client.get("/wrapping/jooble/abroad")

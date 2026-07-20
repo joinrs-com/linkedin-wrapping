@@ -11,8 +11,10 @@ from sqlmodel import SQLModel, Field
 
 def _resolve_schema() -> dict:
     url = os.getenv("DATABASE_URL", "")
+    if not url or not str(url).strip():
+        return {}
     try:
-        if url and make_url(url).get_backend_name() == "mysql":
+        if make_url(url).get_backend_name() in ("mysql", "sqlite"):
             return {}
     except Exception:
         pass
@@ -69,6 +71,50 @@ class JobPostingPre(SQLModel, table=True):
         default=None,
         sa_column_kwargs={"server_default": "CURRENT_TIMESTAMP", "onupdate": datetime.now}
     )
+
+
+class JobDescriptionEnriched(SQLModel, table=True):
+    """Shared OpenAI-enriched descriptions keyed by production job_id."""
+
+    __tablename__ = "job_description_enriched"
+    __table_args__ = _resolve_schema()
+
+    job_id: int = Field(primary_key=True)
+    description: str = Field(sa_column=Column("description", Text, nullable=False))
+    priority: int | None = None
+    has_ita: int | None = None
+    employers_id: int | None = None
+    enriched_at: datetime
+
+
+class JobFeedPipelineRun(SQLModel, table=True):
+    """One row per run of scripts/run_job_feed_pipeline.py."""
+
+    __tablename__ = "job_feed_pipeline_run"
+    __table_args__ = _resolve_schema()
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    started_at: datetime
+    finished_at: datetime | None = None
+    duration_sec: int | None = None
+    status: str
+    openai_processed: int = 0
+    enriched_deleted: int = 0
+    enriched_total: int = 0
+    linkedin_active: int = 0
+    linkedin_inserted: int = 0
+    linkedin_deleted: int = 0
+    linkedin_total: int = 0
+    jooble_inserted: int = 0
+    jooble_deleted: int = 0
+    jooble_total: int = 0
+    whatjobs_inserted: int = 0
+    whatjobs_deleted: int = 0
+    whatjobs_total: int = 0
+    hirematic_inserted: int = 0
+    hirematic_deleted: int = 0
+    hirematic_total: int = 0
+    error_message: str | None = Field(default=None, sa_column=Column("error_message", Text, nullable=True))
 
 
 class HirematicJobFeed(SQLModel, table=True):

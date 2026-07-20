@@ -15,6 +15,7 @@ typing_extensions==4.13.2
 mysql-connector-python==9.3.0
 # Used when DATABASE_URL uses mysql+pymysql:// (GitHub Actions + SQLAlchemy)
 PyMySQL==1.1.1
+cryptography>=42.0.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
 

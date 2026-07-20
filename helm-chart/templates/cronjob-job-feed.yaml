@@ -11,6 +11,9 @@ spec:
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5
   schedule: {{ .Values.jobFeedPipeline.schedule | quote }}
+  {{- if .Values.jobFeedPipeline.timeZone }}
+  timeZone: {{ .Values.jobFeedPipeline.timeZone | quote }}
+  {{- end }}
   jobTemplate:
     spec:
       activeDeadlineSeconds: {{ .Values.jobFeedPipeline.activeDeadlineSeconds }}
@@ -28,13 +31,18 @@ spec:
               workingDir: /app
               command:
                 - python
-                - scripts/run_linkedin_jooble_pipeline.py
+                - scripts/run_job_feed_pipeline.py
               env:
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef:
                       name: database-url
                       key: database-url
+                - name: JOB_FEED_SOURCE_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.jobFeedPipeline.sourceDatabaseSecretName | quote }}
+                      key: {{ .Values.jobFeedPipeline.sourceDatabaseSecretKey | quote }}
                 - name: OPENAI_API_KEY
                   valueFrom:
                     secretKeyRef:

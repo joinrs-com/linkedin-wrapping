@@ -5,6 +5,8 @@ from sqlmodel import Session
 from datetime import datetime, timezone
 from email.utils import format_datetime
 
+from typing import Callable
+
 from utils.database import get_session
 from api.wrapping.service import (
     get_available_job_postings,
@@ -17,6 +19,7 @@ from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
     rewrite_apply_url_for_linkedin_feed,
 )
+from api.platforms.talent import normalize_description_for_talent
 
 
 def _format_rfc1123_gmt(dt: datetime | None = None) -> str:
@@ -169,6 +172,7 @@ def generate_wrapping_xml(
     include_priority: bool = False,
     include_employers_id: bool = False,
     include_countries: bool = False,
+    description_sanitizer: Callable[[str | None], str] | None = None,
 ) -> str:
     """
     Generate XML for wrapping (LinkedIn/Jooble).
@@ -178,6 +182,7 @@ def generate_wrapping_xml(
     - If include_priority is true, outputs <priority> (empty if missing).
     - If include_employers_id is true, outputs <employers_id> from job_postings.employers_id (Jooble only).
     - If include_countries is true, outputs <countries> after <location> (Jooble abroad feed only).
+    - description_sanitizer: optional callable applied to each description before CDATA (Talent.com).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
@@ -201,7 +206,10 @@ def generate_wrapping_xml(
             company_value = getattr(job, "company", None) or ""
         company = _escape_cdata(company_value)
         title = _escape_cdata(job.position if getattr(job, "position", None) else "")
-        description = _escape_cdata(getattr(job, "description", None) or "")
+        raw_description = getattr(job, "description", None) or ""
+        if description_sanitizer is not None:
+            raw_description = description_sanitizer(raw_description)
+        description = _escape_cdata(raw_description)
         raw_apply_url = getattr(job, "apply_url", None) or ""
         if apply_url_mode == "linkedin":
             apply_url = rewrite_apply_url_for_linkedin_feed(raw_apply_url)
@@ -270,6 +278,23 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
     return Response(
         content=xml_content.encode('utf-8'),
         media_type="application/xml; charset=utf-8"
+    )
+
+
+async def get_wrapping_talent(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/talent: Talent.com XML from jooble_job_feed; descriptions sanitized to allowed HTML."""
+    rows = get_jooble_job_feed_rows(session)
+    xml_content = generate_wrapping_xml(
+        rows,
+        apply_url_mode="jooble",
+        prefer_employers_name_as_company=True,
+        include_priority=True,
+        include_employers_id=True,
+        description_sanitizer=normalize_description_for_talent,
+    )
+    return Response(
+        content=xml_content.encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
     )
 
 

@@ -22,19 +22,22 @@ database:
 # Esegue nella VPC del cluster (RDS raggiungibile). Creare il secret OpenAI nel namespace:
 # kubectl create secret generic openai-api-key --from-literal=OPENAI_API_KEY=sk-... -n lw
 jobFeedPipeline:
-  enabled: false
+  enabled: true
   suspend: false
-  schedule: "0 4,13 * * *"
+  schedule: "0 6,15 * * *"
+  timeZone: "Europe/Rome"
   activeDeadlineSeconds: 7200
+  sourceDatabaseSecretName: job-feed-source-database-url
+  sourceDatabaseSecretKey: job-feed-source-database-url
   openaiSecretName: openai-api-key
   openaiSecretKey: OPENAI_API_KEY
   resources:
     limits:
       cpu: "1"
-      memory: 1Gi
+      memory: 2Gi
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
 
 
 ingress:

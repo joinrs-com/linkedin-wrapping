@@ -1,10 +1,6 @@
--- Non-Italy EU jobs for Jooble main feed (GET /wrapping/jooble).
--- Output columns match lw.jooble_job_feed for CSV export / INSERT.
---
--- Workflow:
---   1. scripts/sql/jooble_job_feed_truncate.sql
---   2. Run this SELECT, export results, load into lw.jooble_job_feed
---   3. GET /wrapping/jooble
+-- Italy jobs for Jooble/Talent feed (GET /wrapping/jooble, /wrapping/talent).
+-- Output columns match lw.jooble_job_feed.
+-- Enriched descriptions are merged in Python at INSERT time.
 
 WITH employer_counts AS (
     SELECT
@@ -93,12 +89,6 @@ country_agg AS (
     SELECT
         cr.job_posting_id,
         MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita,
-        MAX(CASE WHEN cr.country_code = 'ESP' THEN 1 ELSE 0 END) AS has_esp,
-        MAX(CASE WHEN cr.country_code = 'POR' THEN 1 ELSE 0 END) AS has_por,
-        MAX(CASE WHEN cr.country_code = 'FRA' THEN 1 ELSE 0 END) AS has_fra,
-        MAX(CASE WHEN cr.country_code = 'DEU' THEN 1 ELSE 0 END) AS has_deu,
-        MAX(CASE WHEN cr.country_code = 'GBR' THEN 1 ELSE 0 END) AS has_gbr,
-        MAX(CASE WHEN cr.country_code = 'BEL' THEN 1 ELSE 0 END) AS has_bel,
         COUNT(DISTINCT NULLIF(cr.country_code, '')) AS country_count,
         GROUP_CONCAT(
             DISTINCT CASE
@@ -198,12 +188,6 @@ prepared AS (
 
         COALESCE(la.city_count, 0) AS city_count,
         COALESCE(ca.has_ita, 0) AS has_ita,
-        COALESCE(ca.has_esp, 0) AS has_esp,
-        COALESCE(ca.has_por, 0) AS has_por,
-        COALESCE(ca.has_fra, 0) AS has_fra,
-        COALESCE(ca.has_deu, 0) AS has_deu,
-        COALESCE(ca.has_gbr, 0) AS has_gbr,
-        COALESCE(ca.has_bel, 0) AS has_bel,
         COALESCE(ca.country_count, 0) AS country_count,
 
         la.first_city_label,
@@ -279,13 +263,13 @@ SELECT
     n.priority AS priority,
 
     CONCAT(
-        '<p><strong>This position is at ', n.employer_name, '</strong></p>',
+        '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
         '<br><br>',
-        '<p><em>The selection process will be fully managed by ', n.employer_name, '.</em></p>',
+        '<p><em>Il processo di selezione sarà interamente gestito ', n.employer_name, '.</em></p>',
         '<br><br>',
         CASE
             WHEN n.city_count > 1 THEN CONCAT(
-                '<p><em>This opportunity is available in ',
+                '<p><em>Questa opportunità è disponibile in ',
                 n.city_list,
                 '.</em></p><br><br>'
             )
@@ -323,21 +307,13 @@ SELECT
         n.first_city_label
     ) AS location,
 
-    CASE
-        WHEN n.has_gbr = 1 THEN 'GBR'
-        WHEN n.has_deu = 1 THEN 'DEU'
-        WHEN n.has_fra = 1 THEN 'FRA'
-        WHEN n.has_esp = 1 THEN 'ESP'
-        WHEN n.has_por = 1 THEN 'POR'
-        WHEN n.has_bel = 1 THEN 'BEL'
-        ELSE SUBSTRING_INDEX(COALESCE(n.countries, ''), ', ', 1)
-    END AS countries,
+    'ITA' AS countries,
 
     COALESCE(n.all_workmodes, '') AS workplace_types,
     n.normalized_seniority AS experience_level,
 
     'Full Time' AS jobtype,
-    n.id AS partner_job_id,
+    CAST(n.id AS CHAR) AS partner_job_id,
     n.created_at AS last_build_date
 
 FROM normalized n
@@ -348,16 +324,8 @@ WHERE
         OR n.product IS NULL
     )
     AND n.priority IN (1, 2, 3, 4, 5)
-    AND n.has_ita = 0
+    AND n.has_ita = 1
     AND n.employers_id <> 1179402
-    AND (
-           n.has_esp = 1
-        OR n.has_por = 1
-        OR n.has_fra = 1
-        OR n.has_deu = 1
-        OR n.has_gbr = 1
-        OR n.has_bel = 1
-    )
 
 ORDER BY
     n.priority ASC,

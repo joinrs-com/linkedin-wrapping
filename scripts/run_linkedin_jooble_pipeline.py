@@ -137,6 +137,10 @@ def _refresh_pre_one_server(insert_sql: str) -> None:
 
 
 def main() -> None:
+    print(
+        "DEPRECATO: usa scripts/run_job_feed_pipeline.py (sync incrementale, senza job_posting_pre).",
+        file=sys.stderr,
+    )
     if not os.getenv("DATABASE_URL"):
         raise SystemExit("DATABASE_URL non impostata")
 

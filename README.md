@@ -5,7 +5,8 @@ FastAPI service that provides job posting data for LinkedIn wrapping via XML API
 ## Features
 
 - GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
-- GET `/wrapping/jooble` – XML Jooble principale da `jooble_job_feed` (annunci non-Italia EU, refresh manuale, no OpenAI)
+- GET `/wrapping/jooble` – XML Jooble/Talent da `jooble_job_feed` (annunci Italia, pipeline automatica)
+- GET `/wrapping/talent` – stesso XML di Jooble, dati da `jooble_job_feed`
 - GET `/wrapping/jooble/abroad` – XML Jooble separato per annunci enterprise all'estero (`jooble_abroad_job_feed`, refresh manuale)
 - GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia, refresh manuale, no OpenAI)
 - Database migrations using Alembic with `lw` schema
@@ -59,16 +60,15 @@ Returns XML with job postings for **LinkedIn** wrapping. Apply URLs are rewritte
 
 ### GET /wrapping/jooble
 
-Feed Jooble **principale**. Legge da `lw.jooble_job_feed` (annunci non-Italia in ESP/POR/FRA/DEU/GBR/BEL), popolata manualmente con la query in `scripts/sql/jooble_job_feed_select.sql`. La description è pre-formattata in SQL (non passa da OpenAI).
+Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Legge da `lw.jooble_job_feed` (annunci Italia). Aggiornata automaticamente da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome via CronJob K8s).
 
 L'`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`).
 
-**Refresh manuale:**
+**Test manuale pipeline:**
 
 ```bash
-mysql ... lw < scripts/sql/jooble_job_feed_truncate.sql
-# Esegui SELECT ed importa in lw.jooble_job_feed
-# scripts/sql/jooble_job_feed_select.sql
+# .env: DATABASE_URL (lw), JOB_FEED_SOURCE_DATABASE_URL (production), OPENAI_API_KEY
+python scripts/run_job_feed_pipeline.py
 ```
 
 **Response:**
@@ -111,17 +111,9 @@ Dopo `alembic upgrade head` la tabella viene creata automaticamente.
 
 ### GET /wrapping/whatjobs
 
-Feed **WhatJobs** per annunci in Italia (priority 1–5). Legge da `lw.whatjobs_job_feed`, popolata manualmente con la query in `scripts/sql/whatjobs_job_feed_select.sql`. La description è pre-formattata in SQL (non passa da OpenAI).
+Feed **WhatJobs** per annunci in Italia (priority 1–5). Legge da `lw.whatjobs_job_feed`, aggiornata dalla pipeline automatica.
 
 Il `link` è il URL canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`). Formato XML WhatJobs con tag `link`, `name`, `region`, `description`, `company`, ecc. in sezioni CDATA.
-
-**Refresh manuale:**
-
-```bash
-mysql ... lw < scripts/sql/whatjobs_job_feed_truncate.sql
-# Esegui SELECT ed importa in lw.whatjobs_job_feed
-# scripts/sql/whatjobs_job_feed_select.sql
-```
 
 **Response:**
 ```xml
@@ -141,11 +133,48 @@ mysql ... lw < scripts/sql/whatjobs_job_feed_truncate.sql
 </jobs>
 ```
 
+### GET /
+
+Root endpoint with service information.
+
+## Job feed pipeline (automatica)
+
+`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE):
+
+1. OpenAI su job **nuovi** priority 1–3 con location Italia → `job_description_enriched`
+2. Sync `job_postings`, `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`
+
+**Variabili `.env`:**
+
+- `DATABASE_URL` — joinrs-intelligence / `lw` (destinazione)
+- `JOB_FEED_SOURCE_DATABASE_URL` — mysql-production01 / `job_postings` (sorgente)
+- `OPENAI_API_KEY` — richiesta solo se ci sono nuovi job da arricchire
+
+**CronJob K8s:** 6:00 e 15:00 Europe/Rome (`helm-chart`, `jobFeedPipeline.enabled: true`).
+
+Report ultimo run:
+
+```sql
+SELECT * FROM job_feed_pipeline_run ORDER BY id DESC LIMIT 1;
+```
+
+Dopo il deploy, esegui le migrazioni `0012` e `0013`:
+
+```bash
+cd api/wrapping && alembic upgrade head
+```
+
+**Recovery dopo errore OpenAI** (es. `401 invalid_api_key` durante il primo run): correggi `OPENAI_API_KEY`, poi svuota la tabella enriched prima di rilanciare, altrimenti i job già inseriti con description grezza non verranno riprocessati:
+
+```sql
+TRUNCATE TABLE job_description_enriched;
+```
+
 ### GET /health
 
 Health check endpoint.
 
-### GET /
+## Testing
 
 Root endpoint with service information.
 
@@ -193,6 +222,8 @@ helm install linkedin-wrapping ./helm-chart \
 
 ### Environment Variables
 
-- `DATABASE_URL`: Database connection string (required)
+- `DATABASE_URL`: Database connection string (required, destinazione lw)
+- `JOB_FEED_SOURCE_DATABASE_URL`: MySQL production read (pipeline CronJob)
+- `OPENAI_API_KEY`: OpenAI key (pipeline enrichment)
 
 

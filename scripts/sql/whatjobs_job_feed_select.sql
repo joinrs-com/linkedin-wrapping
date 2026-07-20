@@ -1,10 +1,6 @@
--- Italy jobs for WhatJobs sponsorship feed (GET /wrapping/whatjobs).
--- Output columns match lw.whatjobs_job_feed for CSV export / INSERT.
---
--- Workflow:
---   1. scripts/sql/whatjobs_job_feed_truncate.sql
---   2. Run this SELECT, export results, load into lw.whatjobs_job_feed
---   3. GET /wrapping/whatjobs
+-- Italy jobs for WhatJobs feed (GET /wrapping/whatjobs).
+-- Output columns match lw.whatjobs_job_feed.
+-- Enriched descriptions are merged in Python at INSERT time.
 
 WITH employer_counts AS (
     SELECT
@@ -333,37 +329,34 @@ SELECT
     CONCAT(
         'https://www.joinrs.com/jobs/',
         n.id
-    ) AS link,
+    ) AS `link`,
 
     -- [OBBLIGATORIO] Titolo della posizione
-    n.position AS name,
+    n.position AS `name`,
 
     -- [OBBLIGATORIO] Regione/location nel formato "città1, città2 - Italy"
     -- Contiene SOLO le città italiane dell'annuncio
-    CONCAT(
-        COALESCE(
-            NULLIF(n.city_list, ''),
-            n.first_city_label
-        ),
-        ' - Italy'
-    ) AS region,
+    CASE
+        WHEN NULLIF(TRIM(n.first_city_label), '') IS NULL THEN 'Italy'
+        ELSE CONCAT(n.first_city_label, ', Italy')
+    END AS `region`,
 
     -- Modalità di lavoro (Remote / Hybrid / On-site)
-    COALESCE(n.all_workmodes, '') AS remote,
+    COALESCE(n.all_workmodes, '') AS `remote`,
 
     -- Salario estratto e formattato dal JSON
     -- NULL se isAvailable = false o campo assente
-    n.salary AS salary,
+    n.salary AS `salary`,
 
     -- [OBBLIGATORIO] Descrizione arricchita con tag tracking
     CONCAT(
-        '<p><strong>This position is at ', n.employer_name, '</strong></p>',
+        '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
         '<br><br>',
-        '<p><em>The selection process will be fully managed by ', n.employer_name, '.</em></p>',
+        '<p><em>Il processo di selezione sarà interamente gestito da ', n.employer_name, '.</em></p>',
         '<br><br>',
         CASE
             WHEN n.city_count > 1 THEN CONCAT(
-                '<p><em>This opportunity is available in ',
+                '<p><em>Questa opportunità è in ',
                 n.city_list,
                 '.</em></p><br><br>'
             )
@@ -385,31 +378,31 @@ SELECT
             WHEN n.is_easy_apply = 1 THEN '<p><strong>[#J-INTERNAL]</strong></p>'
             ELSE ''
         END
-    ) AS description,
+    ) AS `description`,
 
     -- [OBBLIGATORIO] Nome azienda (employer, non "Joinrs")
-    n.employer_name AS company,
+    n.employer_name AS `company`,
 
     -- Logo azienda — URL dalla tabella employers
-    COALESCE(n.employer_logo, '') AS company_logo,
+    COALESCE(n.employer_logo, '') AS `company_logo`,
 
     -- Data di pubblicazione nel formato DD.MM.YYYY
-    DATE_FORMAT(n.created_at, '%d.%m.%Y') AS pubdate,
+    DATE_FORMAT(n.created_at, '%d.%m.%Y') AS `pubdate`,
 
     -- Data di ultimo aggiornamento (usa updated_at se disponibile, altrimenti created_at)
     DATE_FORMAT(
         COALESCE(n.updated_at, n.created_at),
         '%d.%m.%Y'
-    ) AS updated,
+    ) AS `updated`,
 
     -- Data di scadenza = pubblicazione + 60 giorni
     DATE_FORMAT(
         DATE_ADD(n.created_at, INTERVAL 60 DAY),
         '%d.%m.%Y'
-    ) AS expire,
+    ) AS `expire`,
 
     -- Tipologia contratto (fisso a full-time per questo feed)
-    'full-time' AS jobtype,
+    'full-time' AS `jobtype`,
 
     -- ---- Campi extra utili per debug / monitoring (non vanno nell'XML) ----
     n.id              AS id,
