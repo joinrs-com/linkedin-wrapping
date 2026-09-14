@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "scripts"))
 
 from job_feed_common import (  # noqa: E402
+    _insert_rows,
     load_sql,
     sync_feed_table,
 )
@@ -108,6 +109,44 @@ def test_sync_feed_table_insert_delete_only(sqlite_pair):
     assert list(by_id.keys()) == [1, 5, 6, 11, 12, 13, 14, 15]
     assert by_id[11] == "enriched-11"
     assert by_id[1] == "old-1"
+
+
+def test_insert_rows_uses_multi_row_insert_per_chunk(sqlite_pair):
+    """One execute per chunk (multi-row VALUES), not one execute per row."""
+    _, dest = sqlite_pair
+    rows = [
+        {"id": 100 + i, "description": f"d-{i}", "title": f"t-{i}"}
+        for i in range(7)
+    ]
+    execute_calls: list[str] = []
+
+    with dest.connect() as conn:
+        real_execute = conn.execute
+
+        def tracking_execute(statement, *args, **kwargs):
+            sql = str(statement)
+            if sql.strip().upper().startswith("INSERT"):
+                execute_calls.append(sql)
+            return real_execute(statement, *args, **kwargs)
+
+        conn.execute = tracking_execute  # type: ignore[method-assign]
+        inserted = _insert_rows(
+            conn,
+            "feed",
+            ["id", "description", "title"],
+            rows,
+            chunk_size=3,
+        )
+
+    assert inserted == 7
+    assert len(execute_calls) == 3  # chunks of 3, 3, 1
+    assert execute_calls[0].count("VALUES") == 1
+    assert execute_calls[0].count("(") >= 4  # column list + 3 value groups
+    assert ":id_0" in execute_calls[0] and ":id_1" in execute_calls[0]
+
+    with dest.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM feed WHERE id >= 100")).scalar()
+    assert count == 7
 
 
 def test_should_enrich_requires_italy_and_priority():
