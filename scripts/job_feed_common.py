@@ -98,19 +98,24 @@ def _insert_rows(
     columns: list[str],
     rows: list[dict[str, Any]],
     *,
-    chunk_size: int = 100,
+    chunk_size: int = 25,
 ) -> int:
+    """Multi-row INSERT in chunks; commit each chunk to avoid long transactions."""
     if not rows:
         return 0
     col_sql = ", ".join(columns)
     inserted = 0
     for chunk in _chunked(rows, chunk_size):
-        ph = ", ".join(f":{c}" for c in columns)
-        stmt = text(f"INSERT INTO {table} ({col_sql}) VALUES ({ph})")
-        for row in chunk:
-            payload = {c: row.get(c) for c in columns}
-            conn.execute(stmt, payload)
-            inserted += 1
+        value_groups: list[str] = []
+        payload: dict[str, Any] = {}
+        for i, row in enumerate(chunk):
+            value_groups.append("(" + ", ".join(f":{c}_{i}" for c in columns) + ")")
+            for c in columns:
+                payload[f"{c}_{i}"] = row.get(c)
+        stmt = text(f"INSERT INTO {table} ({col_sql}) VALUES {', '.join(value_groups)}")
+        conn.execute(stmt, payload)
+        conn.commit()
+        inserted += len(chunk)
     return inserted
 
 
@@ -155,6 +160,8 @@ def sync_feed_table(
     unchanged = len(existing_ids & active_ids)
 
     deleted = _delete_ids(dest_conn, table, id_column, expired_ids)
+    if deleted:
+        dest_conn.commit()
 
     new_rows: list[dict[str, Any]] = []
     for nid in new_ids:
@@ -166,6 +173,7 @@ def sync_feed_table(
         new_rows.append({c: row.get(c) for c in columns})
 
     inserted = _insert_rows(dest_conn, table, columns, new_rows)
+    # Inserts commit per chunk; this commit is a no-op if nothing pending.
     dest_conn.commit()
 
     total_row = dest_conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()

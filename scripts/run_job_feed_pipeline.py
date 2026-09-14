@@ -256,22 +256,26 @@ def run_pipeline() -> dict:
     feed_results: dict[str, SyncResult] = {}
 
     try:
-        with src_engine.connect() as src_conn, dest_engine.connect() as dest_conn:
-            print("=" * 60)
-            print("Job feed pipeline — enrichment")
-            print("=" * 60)
+        # Fresh connections per phase: long-lived sockets die on MySQL wait_timeout
+        # (seen as OperationalError 2013 during Sync adzuna after multi-hour runs).
+        print("=" * 60)
+        print("Job feed pipeline — enrichment")
+        print("=" * 60)
+        with src_engine.connect() as src_conn:
             enrichment_inputs = _fetch_enrichment_inputs(src_conn)
-            print(f"Job eleggibili attivi in produzione: {len(enrichment_inputs)}")
-            enrichment = ijd.run_enrichment_pipeline(enrichment_inputs, engine=dest_engine)
+        print(f"Job eleggibili attivi in produzione: {len(enrichment_inputs)}")
+        enrichment = ijd.run_enrichment_pipeline(enrichment_inputs, engine=dest_engine)
 
+        with dest_engine.connect() as dest_conn:
             enriched = load_enriched_descriptions(dest_conn)
-            print(f"job_description_enriched: {len(enriched)} righe\n")
+        print(f"job_description_enriched: {len(enriched)} righe\n")
 
-            for cfg in FEED_CONFIGS:
-                print("=" * 60)
-                print(f"Sync {cfg.name} ({cfg.table})")
-                print("=" * 60)
-                select_sql = load_sql(project_root, cfg.sql_file)
+        for cfg in FEED_CONFIGS:
+            print("=" * 60)
+            print(f"Sync {cfg.name} ({cfg.table})")
+            print("=" * 60)
+            select_sql = load_sql(project_root, cfg.sql_file)
+            with src_engine.connect() as src_conn, dest_engine.connect() as dest_conn:
                 result = sync_feed_table(
                     dest_conn,
                     src_conn,
@@ -283,11 +287,11 @@ def run_pipeline() -> dict:
                     enriched=enriched,
                     string_id=cfg.string_id,
                 )
-                feed_results[cfg.name] = result
-                print(
-                    f"  active={result.active} inserted={result.inserted} "
-                    f"deleted={result.deleted} unchanged={result.unchanged} total={result.total}"
-                )
+            feed_results[cfg.name] = result
+            print(
+                f"  active={result.active} inserted={result.inserted} "
+                f"deleted={result.deleted} unchanged={result.unchanged} total={result.total}"
+            )
 
         finished_at = _utc_now_naive()
         report = _build_report(
