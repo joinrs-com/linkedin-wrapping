@@ -1,6 +1,7 @@
--- Italy jobs for Jooble/Talent feed (GET /wrapping/jooble, /wrapping/talent).
--- Output columns match lw.jooble_job_feed.
+-- Italy jobs for Adzuna feed (GET /wrapping/adzuna).
+-- Output columns match lw.adzuna_job_feed.
 -- Enriched descriptions are merged in Python at INSERT time.
+-- CPC from priority: 1→0.08, 2→0.07, 3→0.03, 4→0.03, 5→0.
 
 WITH employer_counts AS (
     SELECT
@@ -304,10 +305,7 @@ normalized AS (
 
 SELECT
     n.id AS id,
-    n.position AS position,
-    n.employer_name AS employers_name,
-    n.employers_id AS employers_id,
-    n.priority AS priority,
+    n.position AS title,
 
     CONCAT(
         '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
@@ -340,29 +338,45 @@ SELECT
         END
     ) AS description,
 
-    'Joinrs' AS company,
-
     CONCAT(
         'https://www.joinrs.com/jobs/',
-        n.id
-    ) AS apply_url,
+        n.id,
+        '?utm_source=adzuna'
+    ) AS url,
 
-    '829928' AS company_id,
+    CASE
+        WHEN NULLIF(TRIM(n.first_city_label), '') IS NULL THEN 'Italy'
+        ELSE TRIM(SUBSTRING_INDEX(n.first_city_label, ' - ', 1))
+    END AS location,
 
-    COALESCE(
-        NULLIF(n.city_list, ''),
-        n.first_city_label
-    ) AS location,
+    'IT' AS country,
 
-    'ITA' AS countries,
+    CASE
+        WHEN n.all_workmodes LIKE '%Remote%' THEN 'Remote'
+        ELSE 'Non-Remote'
+    END AS remote,
 
-    COALESCE(n.all_workmodes, '') AS workplace_types,
-    n.normalized_seniority AS experience_level,
+    n.salary AS salary,
+    n.employer_name AS company,
 
-    'Full Time' AS jobtype,
-    CAST(n.id AS CHAR) AS partner_job_id,
-    n.created_at AS last_build_date,
-    n.salary AS salary
+    CONCAT_WS(
+        ', ',
+        NULLIF(TRIM(COALESCE(n.all_workmodes, '')), ''),
+        NULLIF(TRIM(COALESCE(n.normalized_seniority, '')), '')
+    ) AS category,
+
+    DATE(n.created_at) AS `date`,
+
+    CASE n.priority
+        WHEN 1 THEN 0.08
+        WHEN 2 THEN 0.07
+        WHEN 3 THEN 0.03
+        WHEN 4 THEN 0.03
+        WHEN 5 THEN 0
+        ELSE 0
+    END AS cpc,
+
+    n.priority AS priority
 
 FROM normalized n
 

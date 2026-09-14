@@ -114,6 +114,9 @@ class JobFeedPipelineRun(SQLModel, table=True):
     hirematic_inserted: int = 0
     hirematic_deleted: int = 0
     hirematic_total: int = 0
+    adzuna_inserted: int = 0
+    adzuna_deleted: int = 0
+    adzuna_total: int = 0
     error_message: str | None = Field(default=None, sa_column=Column("error_message", Text, nullable=True))
 
 
@@ -137,10 +140,11 @@ class HirematicJobFeed(SQLModel, table=True):
     description: Optional[str] = Field(default=None, sa_column=Column("description", Text, nullable=True))
     cpc: Optional[float] = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
     priority: Optional[int] = Field(default=None)
+    salary: Optional[str] = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
 
 
 class JoobleJobFeed(SQLModel, table=True):
-    """Maps `lw.jooble_job_feed`; manual daily refresh for Jooble main feed (non-Italy EU jobs)."""
+    """Maps `lw.jooble_job_feed`; Italy jobs for Jooble/Talent XML."""
 
     __tablename__ = "jooble_job_feed"
     __table_args__ = _resolve_schema()
@@ -161,6 +165,7 @@ class JoobleJobFeed(SQLModel, table=True):
     jobtype: str | None = None
     partner_job_id: str | None = None
     last_build_date: datetime | None = None
+    salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
 
 
 class JoobleAbroadJobFeed(SQLModel, table=True):
@@ -185,10 +190,11 @@ class JoobleAbroadJobFeed(SQLModel, table=True):
     jobtype: str | None = None
     partner_job_id: str | None = None
     last_build_date: datetime | None = None
+    salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
 
 
 class WhatjobsJobFeed(SQLModel, table=True):
-    """Maps `lw.whatjobs_job_feed`; manual daily refresh for WhatJobs Italy feed."""
+    """Maps `lw.whatjobs_job_feed`; WhatJobs Italy feed."""
 
     __tablename__ = "whatjobs_job_feed"
     __table_args__ = _resolve_schema()
@@ -209,3 +215,24 @@ class WhatjobsJobFeed(SQLModel, table=True):
     employers_id: int | None = None
     priority: int | None = None
     experience_level: str | None = None
+
+
+class AdzunaJobFeed(SQLModel, table=True):
+    """Maps `lw.adzuna_job_feed`; Adzuna Italy feed with CPC from priority."""
+
+    __tablename__ = "adzuna_job_feed"
+    __table_args__ = _resolve_schema()
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    description: str = Field(sa_column=Column("description", Text, nullable=False))
+    url: str = Field(sa_column=Column("url", Text, nullable=False))
+    location: str = Field(sa_column=Column("location", Text, nullable=False))
+    country: str = Field(sa_column=Column("country", String(10), nullable=False))
+    remote: str | None = None
+    salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
+    company: str | None = None
+    category: str | None = None
+    posted_date: date | None = Field(default=None, sa_column=Column("date", Date, nullable=True))
+    cpc: float | None = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
+    priority: int | None = None

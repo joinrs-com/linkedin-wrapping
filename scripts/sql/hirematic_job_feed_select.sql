@@ -12,6 +12,7 @@ WITH filtered_jobs AS (
     j.seniority,
     j.created_at,
     j.employers_id,
+    j.salary AS salary_json,
     e.name AS company,
     e.priority
   FROM job_postings.job_postings_1 j
@@ -202,7 +203,31 @@ SELECT
     END
   ) AS description,
 
-  NULL AS cpc
+  NULL AS cpc,
+
+  CASE
+    WHEN JSON_VALID(fj.salary_json)
+     AND JSON_UNQUOTE(JSON_EXTRACT(fj.salary_json, '$.isAvailable')) = 'true'
+     AND JSON_EXTRACT(fj.salary_json, '$.min') IS NOT NULL
+    THEN
+      CASE
+        WHEN JSON_EXTRACT(fj.salary_json, '$.min') = JSON_EXTRACT(fj.salary_json, '$.max')
+          OR JSON_EXTRACT(fj.salary_json, '$.max') IS NULL
+        THEN CONCAT(
+          FORMAT(JSON_EXTRACT(fj.salary_json, '$.min'), 0),
+          ' ',
+          UPPER(TRIM(JSON_UNQUOTE(JSON_EXTRACT(fj.salary_json, '$.currency'))))
+        )
+        ELSE CONCAT(
+          FORMAT(JSON_EXTRACT(fj.salary_json, '$.min'), 0),
+          '-',
+          FORMAT(JSON_EXTRACT(fj.salary_json, '$.max'), 0),
+          ' ',
+          UPPER(TRIM(JSON_UNQUOTE(JSON_EXTRACT(fj.salary_json, '$.currency'))))
+        )
+      END
+    ELSE NULL
+  END AS salary
 
 FROM filtered_jobs fj
 INNER JOIN job_primary_location pl

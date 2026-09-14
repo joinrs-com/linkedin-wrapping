@@ -59,73 +59,46 @@ def test_root_endpoint(client: TestClient):
     assert data["version"] == "1.0.0"
 
 
-def test_wrapping_endpoint_empty(client: TestClient):
-    """Test wrapping endpoint with no job postings."""
-    r = client.get("/wrapping/")  # trailing slash to avoid redirect
-    assert r.status_code == 200
-    assert "application/xml" in r.headers.get("content-type", "")
-    content = r.text
-    assert "<source>" in content
-    assert "</source>" in content
-    assert "<lastBuildDate>" in content
-
-
-def test_wrapping_endpoint_with_jobs(client: TestClient):
-    """Test wrapping endpoint with job postings."""
-    # Create test job postings
-    get_sess = list(app.dependency_overrides.values())[0]
-    _now = datetime.now(timezone.utc)
-    with next(get_sess()) as s:  # type: ignore
-        job1 = models.JobPostings(id=1, position="Software Engineer", created_at=_now, updated_at=_now)
-        job2 = models.JobPostings(id=2, position="Data Scientist", created_at=_now, updated_at=_now)
-        s.add(job1)
-        s.add(job2)
-        s.commit()
-
+def test_wrapping_endpoint_removed(client: TestClient):
+    """LinkedIn GET /wrapping is no longer exposed."""
     r = client.get("/wrapping/")
-    assert r.status_code == 200
-    assert "application/xml" in r.headers.get("content-type", "")
-    content = r.text
-
-    # Check XML structure
-    assert "<source>" in content
-    assert "</source>" in content
-    assert "<lastBuildDate>" in content
-    # Job 1
-    assert "<job>" in content
-    assert "<![CDATA[1]]>" in content  # partnerJobId CDATA
-    assert "<![CDATA[Software Engineer]]>" in content  # title CDATA
-    # Job 2
-    assert "<![CDATA[2]]>" in content
-    assert "<![CDATA[Data Scientist]]>" in content
+    assert r.status_code == 404
 
 
-def test_wrapping_linkedin_apply_url_has_utm_source_linkedin(client: TestClient):
-    """LinkedIn XML: utm_source=linkedin and utm_medium=job-offer-ats (canonical DB URL uses employer-priority in medium)."""
-    _now = datetime.now(timezone.utc)
+def test_wrapping_adzuna_xml_and_cpc(client: TestClient):
+    """Adzuna XML: mandatory tags + CPC from priority."""
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
-        job = models.JobPostings(
-            id=1,
-            position="Test",
-            apply_url=(
-                "https://www.joinrs.com/jobs/1/"
-                "?utm_source=linkedin&utm_medium=12345-3&utm_campaign=1-pro"
-            ),
-            created_at=_now,
-            updated_at=_now,
+        row = models.AdzunaJobFeed(
+            id=42,
+            title="Software Engineer",
+            description="<p>" + ("x" * 100) + "</p>",
+            url="https://www.joinrs.com/jobs/42?utm_source=adzuna",
+            location="Milano",
+            country="IT",
+            remote="Remote",
+            salary="30000 EUR",
+            company="Acme",
+            category="Remote, Senior",
+            posted_date=date(2026, 9, 1),
+            cpc=0.08,
+            priority=1,
         )
-        s.add(job)
+        s.add(row)
         s.commit()
 
-    r = client.get("/wrapping/")
+    r = client.get("/wrapping/adzuna")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
-    assert "utm_source=linkedin" in r.text
-    assert "utm_medium=job-offer-ats" in r.text
-    assert "utm_campaign=1-pro" in r.text
-    assert "utm_medium=12345-3" not in r.text
-    assert "<applyUrl>" in r.text
+    assert "<jobs>" in r.text
+    assert "<title><![CDATA[Software Engineer]]></title>" in r.text
+    assert "<id><![CDATA[42]]></id>" in r.text
+    assert "<country><![CDATA[IT]]></country>" in r.text
+    assert "<cpc><![CDATA[" in r.text
+    assert "0.08" in r.text.split("<cpc>")[1].split("</cpc>")[0]
+    assert "<priority><![CDATA[1]]></priority>" in r.text
+    assert "<salary><![CDATA[30000 EUR]]></salary>" in r.text
+    assert "utm_source=adzuna" in r.text
 
 
 def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
@@ -138,6 +111,7 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
             position="Test",
             apply_url="https://www.joinrs.com/jobs/1",
             last_build_date=_now,
+            salary="25000 EUR",
         )
         s.add(row)
         s.commit()
@@ -148,7 +122,7 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
     assert "<source>" in r.text
     assert "<applyUrl><![CDATA[https://www.joinrs.com/jobs/1]]></applyUrl>" in r.text
     assert "utm_" not in r.text.split("<applyUrl>")[1].split("</applyUrl>")[0]
-    assert "<applyUrl>" in r.text
+    assert "<salary><![CDATA[25000 EUR]]></salary>" in r.text
 
 
 def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: TestClient):
@@ -180,9 +154,7 @@ def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: Tes
     assert "Only LinkedIn" not in r.text
 
     r2 = client.get("/wrapping/")
-    assert r2.status_code == 200
-    assert "<![CDATA[Only LinkedIn]]>" in r2.text
-    assert "Only Jooble" not in r2.text
+    assert r2.status_code == 404
 
 
 def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
@@ -219,13 +191,6 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
     assert "<priority><![CDATA[3]]></priority>" in r.text
     assert "<employers_id><![CDATA[2341296]]></employers_id>" in r.text
     assert "<countries>" not in r.text
-
-    # LinkedIn must remain unchanged: uses `company`
-    r2 = client.get("/wrapping/")
-    assert r2.status_code == 200
-    assert "<company><![CDATA[OldCompany]]></company>" in r2.text
-    assert "<priority>" not in r2.text
-    assert "<employers_id>" not in r2.text
 
 
 def test_wrapping_jooble_empty(client: TestClient):
@@ -345,10 +310,6 @@ def test_wrapping_jooble_abroad_one_job(client: TestClient):
     r2 = client.get("/wrapping/jooble")
     assert r2.status_code == 200
     assert "<countries>" not in r2.text
-
-    r3 = client.get("/wrapping/")
-    assert r3.status_code == 200
-    assert "<countries>" not in r3.text
 
 
 def test_wrapping_hirematic_empty(client: TestClient):
@@ -501,10 +462,5 @@ def test_wrapping_whatjobs_reads_from_table_not_job_postings(client: TestClient)
     assert r.status_code == 200
     assert "<![CDATA[Only WhatJobs]]>" in r.text
     assert "Only LinkedIn" not in r.text
-
-    r2 = client.get("/wrapping/")
-    assert r2.status_code == 200
-    assert "<![CDATA[Only LinkedIn]]>" in r2.text
-    assert "Only WhatJobs" not in r2.text
 
 

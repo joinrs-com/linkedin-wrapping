@@ -9,7 +9,7 @@ from typing import Callable
 
 from utils.database import get_session
 from api.wrapping.service import (
-    get_available_job_postings,
+    get_adzuna_job_feed_rows,
     get_hirematic_job_feed_rows,
     get_jooble_abroad_job_feed_rows,
     get_jooble_job_feed_rows,
@@ -17,7 +17,6 @@ from api.wrapping.service import (
 )
 from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
-    rewrite_apply_url_for_linkedin_feed,
 )
 from api.platforms.talent import normalize_description_for_talent
 
@@ -118,6 +117,9 @@ def generate_hirematic_appcast_xml(rows: list) -> str:
         parts.append(f"<body>{_appcast_element_text(getattr(job, 'description', None))}</body>")
         parts.append(f"<cpc>{_appcast_element_text(getattr(job, 'cpc', None))}</cpc>")
         parts.append(f"<priority>{_appcast_element_text(getattr(job, 'priority', None))}</priority>")
+        salary = getattr(job, "salary", None)
+        if salary is not None and str(salary).strip():
+            parts.append(f"<salary>{_appcast_element_text(salary)}</salary>")
         parts.append("</job>")
     parts.append("</jobs>")
     parts.append(f"<generation_time>{_appcast_element_text(_format_generation_time_appcast())}</generation_time>")
@@ -164,6 +166,34 @@ def generate_whatjobs_xml(rows: list) -> str:
     return "\n".join(parts)
 
 
+def generate_adzuna_xml(rows: list) -> str:
+    """Adzuna-compatible XML (Italy feed)."""
+    parts: list[str] = []
+    parts.append('<?xml version="1.0" encoding="UTF-8"?>')
+    parts.append("<jobs>")
+    for job in rows:
+        parts.append("  <job>")
+        parts.extend(_whatjobs_cdata_lines("title", getattr(job, "title", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("id", getattr(job, "id", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("description", getattr(job, "description", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("url", getattr(job, "url", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("location", getattr(job, "location", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("country", getattr(job, "country", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("remote", getattr(job, "remote", None)))
+        parts.extend(_whatjobs_cdata_lines("salary", getattr(job, "salary", None)))
+        parts.extend(_whatjobs_cdata_lines("company", getattr(job, "company", None)))
+        parts.extend(_whatjobs_cdata_lines("category", getattr(job, "category", None)))
+        date_val = getattr(job, "posted_date", None)
+        if date_val is not None and hasattr(date_val, "isoformat"):
+            date_val = date_val.isoformat()
+        parts.extend(_whatjobs_cdata_lines("date", date_val))
+        parts.extend(_whatjobs_cdata_lines("cpc", getattr(job, "cpc", None)))
+        parts.extend(_whatjobs_cdata_lines("priority", getattr(job, "priority", None)))
+        parts.append("  </job>")
+    parts.append("</jobs>")
+    return "\n".join(parts)
+
+
 def generate_wrapping_xml(
     job_postings,
     *,
@@ -175,9 +205,9 @@ def generate_wrapping_xml(
     description_sanitizer: Callable[[str | None], str] | None = None,
 ) -> str:
     """
-    Generate XML for wrapping (LinkedIn/Jooble).
+    Generate XML for Jooble/Talent wrapping.
 
-    - apply_url_mode: 'linkedin' (utm_medium=job-offer-ats in XML) or 'jooble' (apply URL without query params).
+    - apply_url_mode: 'jooble' (apply URL without query params).
     - If prefer_employers_name_as_company is true, <company> uses employers_name when present, else falls back to company.
     - If include_priority is true, outputs <priority> (empty if missing).
     - If include_employers_id is true, outputs <employers_id> from job_postings.employers_id (Jooble only).
@@ -211,12 +241,10 @@ def generate_wrapping_xml(
             raw_description = description_sanitizer(raw_description)
         description = _escape_cdata(raw_description)
         raw_apply_url = getattr(job, "apply_url", None) or ""
-        if apply_url_mode == "linkedin":
-            apply_url = rewrite_apply_url_for_linkedin_feed(raw_apply_url)
-        elif apply_url_mode == "jooble":
+        if apply_url_mode == "jooble":
             apply_url = rewrite_apply_url_for_jooble_feed(raw_apply_url)
         else:
-            raise ValueError(f"apply_url_mode must be 'linkedin' or 'jooble', got {apply_url_mode!r}")
+            raise ValueError(f"apply_url_mode must be 'jooble', got {apply_url_mode!r}")
         apply_url = _escape_cdata(apply_url)
         company_id = _escape_cdata(getattr(job, "company_id", None) or "")
         location = _escape_cdata(getattr(job, "location", None) or "")
@@ -228,6 +256,7 @@ def generate_wrapping_xml(
         priority = _escape_cdata("" if priority_raw is None else str(priority_raw))
         employers_id_raw = getattr(job, "employers_id", None)
         employers_id = _escape_cdata("" if employers_id_raw is None else str(employers_id_raw))
+        salary = _escape_cdata(getattr(job, "salary", None) or "")
 
         parts.append(" <job>")
         # partner_job_id is typically numeric, but escape it anyway for safety
@@ -248,21 +277,13 @@ def generate_wrapping_xml(
         parts.append(f"  <workplaceTypes><![CDATA[{workplace_types}]]></workplaceTypes>")
         parts.append(f"  <experienceLevel><![CDATA[{experience_level}]]></experienceLevel>")
         parts.append(f"  <jobtype><![CDATA[{jobtype}]]></jobtype>")
+        if salary:
+            parts.append(f"  <salary><![CDATA[{salary}]]></salary>")
         parts.append(" </job>")
 
     parts.append("</source>")
 
     return "\n".join(parts)
-
-
-async def get_wrapping(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping endpoint: XML with job postings for LinkedIn (apply URLs with utm_source=linkedin)."""
-    job_postings = get_available_job_postings(session)
-    xml_content = generate_wrapping_xml(job_postings, apply_url_mode="linkedin")
-    return Response(
-        content=xml_content.encode('utf-8'),
-        media_type="application/xml; charset=utf-8"
-    )
 
 
 async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
@@ -329,6 +350,16 @@ async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Resp
     """GET /wrapping/whatjobs: WhatJobs XML from whatjobs_job_feed (URLs as stored, no UTM rewrite)."""
     rows = get_whatjobs_job_feed_rows(session)
     xml_content = generate_whatjobs_xml(rows)
+    return Response(
+        content=xml_content.encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/adzuna: Adzuna XML from adzuna_job_feed (Italy, CPC from priority)."""
+    rows = get_adzuna_job_feed_rows(session)
+    xml_content = generate_adzuna_xml(rows)
     return Response(
         content=xml_content.encode("utf-8"),
         media_type="application/xml; charset=utf-8",

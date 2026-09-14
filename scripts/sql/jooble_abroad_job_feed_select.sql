@@ -103,6 +103,49 @@ country_agg AS (
     GROUP BY cr.job_posting_id
 ),
 
+salary_extracted AS (
+    SELECT
+        jp.id AS job_posting_id,
+        CASE
+            WHEN JSON_VALID(jp.salary)
+             AND JSON_UNQUOTE(JSON_EXTRACT(jp.salary, '$.isAvailable')) = 'true'
+            THEN JSON_EXTRACT(jp.salary, '$.min')
+            ELSE NULL
+        END AS salary_min,
+        CASE
+            WHEN JSON_VALID(jp.salary)
+             AND JSON_UNQUOTE(JSON_EXTRACT(jp.salary, '$.isAvailable')) = 'true'
+            THEN JSON_EXTRACT(jp.salary, '$.max')
+            ELSE NULL
+        END AS salary_max,
+        CASE
+            WHEN JSON_VALID(jp.salary)
+             AND JSON_UNQUOTE(JSON_EXTRACT(jp.salary, '$.isAvailable')) = 'true'
+            THEN UPPER(TRIM(JSON_UNQUOTE(JSON_EXTRACT(jp.salary, '$.currency'))))
+            ELSE NULL
+        END AS salary_currency
+    FROM job_postings.job_postings_1 jp
+),
+
+salary_formatted AS (
+    SELECT
+        se.job_posting_id,
+        CASE
+            WHEN se.salary_min IS NULL THEN NULL
+            WHEN se.salary_min = se.salary_max
+                THEN CONCAT(FORMAT(se.salary_min, 0), ' ', se.salary_currency)
+            ELSE
+                CONCAT(
+                    FORMAT(se.salary_min, 0),
+                    '-',
+                    FORMAT(se.salary_max, 0),
+                    ' ',
+                    se.salary_currency
+                )
+        END AS salary
+    FROM salary_extracted se
+),
+
 prepared AS (
     SELECT
         jp.id,
@@ -124,6 +167,7 @@ prepared AS (
         la.first_city_label,
         la.city_list,
         ca.countries,
+        sf.salary,
 
         '' AS ai_summary,
 
@@ -149,6 +193,9 @@ prepared AS (
 
     LEFT JOIN country_agg ca
         ON ca.job_posting_id = jp.id
+
+    LEFT JOIN salary_formatted sf
+        ON sf.job_posting_id = jp.id
 ),
 
 extracted AS (
@@ -285,7 +332,8 @@ SELECT
 
     'Full Time' AS jobtype,
     n.id AS partner_job_id,
-    n.created_at AS last_build_date
+    n.created_at AS last_build_date,
+    n.salary AS salary
 
 FROM normalized n
 

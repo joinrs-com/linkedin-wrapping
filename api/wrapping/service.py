@@ -3,6 +3,7 @@ from sqlmodel import Session, select
 from typing import List
 
 from api.wrapping.models import (
+    AdzunaJobFeed,
     HirematicJobFeed,
     JobPostings,
     JoobleAbroadJobFeed,
@@ -13,7 +14,7 @@ from api.wrapping.models import (
 
 def get_available_job_postings(session: Session) -> List[JobPostings]:
     """
-    Query job postings available to be published to LinkedIn via wrapping.
+    Query job postings (legacy LinkedIn table; no longer exposed via XML).
     Currently returns all job postings, can be extended with filtering logic.
     """
     statement = select(JobPostings)
@@ -47,6 +48,16 @@ def get_whatjobs_job_feed_rows(session: Session) -> List[WhatjobsJobFeed]:
     statement = select(WhatjobsJobFeed).order_by(
         asc(WhatjobsJobFeed.priority),
         desc(WhatjobsJobFeed.pubdate),
+    )
+    results = session.exec(statement)
+    return list(results.all())
+
+
+def get_adzuna_job_feed_rows(session: Session) -> List[AdzunaJobFeed]:
+    """All rows from adzuna_job_feed for Adzuna XML export."""
+    statement = select(AdzunaJobFeed).order_by(
+        asc(AdzunaJobFeed.priority),
+        desc(AdzunaJobFeed.posted_date),
     )
     results = session.exec(statement)
     return list(results.all())

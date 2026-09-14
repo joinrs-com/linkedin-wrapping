@@ -56,30 +56,6 @@ class FeedConfig:
 
 FEED_CONFIGS: list[FeedConfig] = [
     FeedConfig(
-        name="linkedin",
-        table="job_postings",
-        sql_file="job_postings_select.sql",
-        columns=[
-            "position",
-            "description",
-            "company",
-            "employers_name",
-            "employers_id",
-            "priority",
-            "apply_url",
-            "company_id",
-            "location",
-            "workplace_types",
-            "experience_level",
-            "jobtype",
-            "partner_job_id",
-            "last_build_date",
-        ],
-        id_column="partner_job_id",
-        description_column="description",
-        string_id=True,
-    ),
-    FeedConfig(
         name="jooble",
         table="jooble_job_feed",
         sql_file="jooble_job_feed_select.sql",
@@ -100,6 +76,7 @@ FEED_CONFIGS: list[FeedConfig] = [
             "jobtype",
             "partner_job_id",
             "last_build_date",
+            "salary",
         ],
         id_column="id",
         description_column="description",
@@ -147,6 +124,29 @@ FEED_CONFIGS: list[FeedConfig] = [
             "url",
             "description",
             "cpc",
+            "salary",
+        ],
+        id_column="id",
+        description_column="description",
+    ),
+    FeedConfig(
+        name="adzuna",
+        table="adzuna_job_feed",
+        sql_file="adzuna_job_feed_select.sql",
+        columns=[
+            "id",
+            "title",
+            "description",
+            "url",
+            "location",
+            "country",
+            "remote",
+            "salary",
+            "company",
+            "category",
+            "date",
+            "cpc",
+            "priority",
         ],
         id_column="id",
         description_column="description",
@@ -201,8 +201,16 @@ def _build_report(
     return report
 
 
+def _feed_or_zero(feeds: dict[str, SyncResult], name: str) -> SyncResult:
+    return feeds.get(name) or SyncResult(0, 0, 0, 0, 0)
+
+
 def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult, feed_results: dict[str, SyncResult]) -> None:
     feeds = feed_results
+    jooble = _feed_or_zero(feeds, "jooble")
+    whatjobs = _feed_or_zero(feeds, "whatjobs")
+    hirematic = _feed_or_zero(feeds, "hirematic")
+    adzuna = _feed_or_zero(feeds, "adzuna")
     with Session(dest_engine) as session:
         row = JobFeedPipelineRun(
             started_at=datetime.fromisoformat(report["started_at"]),
@@ -212,19 +220,22 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
             openai_processed=enrichment.processed,
             enriched_deleted=enrichment.deleted,
             enriched_total=enrichment.total,
-            linkedin_active=feeds["linkedin"].active,
-            linkedin_inserted=feeds["linkedin"].inserted,
-            linkedin_deleted=feeds["linkedin"].deleted,
-            linkedin_total=feeds["linkedin"].total,
-            jooble_inserted=feeds["jooble"].inserted,
-            jooble_deleted=feeds["jooble"].deleted,
-            jooble_total=feeds["jooble"].total,
-            whatjobs_inserted=feeds["whatjobs"].inserted,
-            whatjobs_deleted=feeds["whatjobs"].deleted,
-            whatjobs_total=feeds["whatjobs"].total,
-            hirematic_inserted=feeds["hirematic"].inserted,
-            hirematic_deleted=feeds["hirematic"].deleted,
-            hirematic_total=feeds["hirematic"].total,
+            linkedin_active=0,
+            linkedin_inserted=0,
+            linkedin_deleted=0,
+            linkedin_total=0,
+            jooble_inserted=jooble.inserted,
+            jooble_deleted=jooble.deleted,
+            jooble_total=jooble.total,
+            whatjobs_inserted=whatjobs.inserted,
+            whatjobs_deleted=whatjobs.deleted,
+            whatjobs_total=whatjobs.total,
+            hirematic_inserted=hirematic.inserted,
+            hirematic_deleted=hirematic.deleted,
+            hirematic_total=hirematic.total,
+            adzuna_inserted=adzuna.inserted,
+            adzuna_deleted=adzuna.deleted,
+            adzuna_total=adzuna.total,
             error_message=report.get("error_message"),
         )
         session.add(row)

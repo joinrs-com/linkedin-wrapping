@@ -1,14 +1,15 @@
 # LinkedIn Wrapping Service
 
-FastAPI service that provides job posting data for LinkedIn wrapping via XML API.
+FastAPI service that provides job posting XML feeds for partner platforms.
 
 ## Features
 
-- GET `/wrapping` – XML per LinkedIn (apply URLs con `utm_source=linkedin`)
-- GET `/wrapping/jooble` – XML Jooble/Talent da `jooble_job_feed` (annunci Italia, pipeline automatica)
-- GET `/wrapping/talent` – stesso XML di Jooble, dati da `jooble_job_feed`
+- GET `/wrapping/jooble` – XML Jooble da `jooble_job_feed` (annunci Italia, pipeline automatica)
+- GET `/wrapping/talent` – stesso XML di Jooble, description HTML sanitizzata per Talent.com
 - GET `/wrapping/jooble/abroad` – XML Jooble separato per annunci enterprise all'estero (`jooble_abroad_job_feed`, refresh manuale)
-- GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia, refresh manuale, no OpenAI)
+- GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia)
+- GET `/wrapping/hirematic` – XML Appcast Hirematic da `hirematic_job_feed`
+- GET `/wrapping/adzuna` – XML Adzuna da `adzuna_job_feed` (Italia, CPC da priority)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -54,15 +55,11 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 
 ## API Endpoints
 
-### GET /wrapping
-
-Returns XML with job postings for **LinkedIn** wrapping. Apply URLs are rewritten with `utm_source=linkedin`.
-
 ### GET /wrapping/jooble
 
 Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Legge da `lw.jooble_job_feed` (annunci Italia). Aggiornata automaticamente da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome via CronJob K8s).
 
-L'`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`).
+L'`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`). Include `<salary>` quando disponibile.
 
 **Test manuale pipeline:**
 
@@ -133,6 +130,32 @@ Il `link` è il URL canonico del job senza query (es. `https://www.joinrs.com/jo
 </jobs>
 ```
 
+### GET /wrapping/adzuna
+
+Feed **Adzuna** per annunci in Italia (priority 1–5). Legge da `lw.adzuna_job_feed`, aggiornata dalla pipeline automatica.
+
+CPC da priority: `1→0.08`, `2→0.07`, `3→0.03`, `4→0.03`, `5→0`. URL con `utm_source=adzuna`.
+
+**Response:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<jobs>
+  <job>
+    <title><![CDATA[Software Engineer]]></title>
+    <id><![CDATA[3218063]]></id>
+    <description><![CDATA[<p>...</p>]]></description>
+    <url><![CDATA[https://www.joinrs.com/jobs/3218063?utm_source=adzuna]]></url>
+    <location><![CDATA[Milano]]></location>
+    <country><![CDATA[IT]]></country>
+    <remote><![CDATA[Remote]]></remote>
+    <salary><![CDATA[30000 EUR]]></salary>
+    <company><![CDATA[Acme Corp]]></company>
+    <cpc><![CDATA[0.08]]></cpc>
+    <priority><![CDATA[1]]></priority>
+  </job>
+</jobs>
+```
+
 ### GET /
 
 Root endpoint with service information.
@@ -142,7 +165,7 @@ Root endpoint with service information.
 `scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE):
 
 1. OpenAI su job **nuovi** priority 1–3 con location Italia → `job_description_enriched`
-2. Sync `job_postings`, `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`
+2. Sync `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`
 
 **Variabili `.env`:**
 
@@ -158,7 +181,7 @@ Report ultimo run:
 SELECT * FROM job_feed_pipeline_run ORDER BY id DESC LIMIT 1;
 ```
 
-Dopo il deploy, esegui le migrazioni `0012` e `0013`:
+Dopo il deploy, esegui le migrazioni fino a `0015`:
 
 ```bash
 cd api/wrapping && alembic upgrade head
