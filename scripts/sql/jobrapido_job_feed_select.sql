@@ -1,5 +1,5 @@
 -- Italy jobs for Job Rapido feed (GET /wrapping/jobrapido).
--- Output columns match lw.jobrapido_job_feed (one row per Italian city).
+-- Output columns match lw.jobrapido_job_feed (one row per job, first Italian city — like Adzuna).
 -- Enriched descriptions are merged in Python at INSERT time.
 -- CPC from priority: 1→0.08, 2→0.07, 3→0.03, 4→0.03, 5→0.
 
@@ -9,6 +9,47 @@ WITH employer_counts AS (
         COUNT(*) AS total_jobs
     FROM job_postings.job_postings_1 jp
     GROUP BY jp.employers_id
+),
+
+location_rows AS (
+    SELECT
+        jp.id AS job_posting_id,
+        jt.ord AS city_ord,
+        jt.city_label,
+        jt.country_code
+    FROM job_postings.job_postings_1 jp
+    LEFT JOIN JSON_TABLE(
+        CASE
+            WHEN JSON_VALID(jp.locations) THEN jp.locations
+            ELSE '{"cities":[]}'
+        END,
+        '$.cities[*]'
+        COLUMNS (
+            ord FOR ORDINALITY,
+            city_label VARCHAR(255) PATH '$.label',
+            country_code VARCHAR(10) PATH '$.country_code'
+        )
+    ) jt ON TRUE
+),
+
+location_agg AS (
+    SELECT
+        lr.job_posting_id,
+        COUNT(lr.city_label) AS city_count,
+        MAX(CASE WHEN lr.city_ord = 1 THEN lr.city_label END) AS first_city_label,
+        GROUP_CONCAT(
+            DISTINCT TRIM(
+                CASE
+                    WHEN lr.city_label REGEXP ' - [A-Z]{2,3}$'
+                        THEN REGEXP_REPLACE(lr.city_label, ' - [A-Z]{2,3}$', '')
+                    ELSE lr.city_label
+                END
+            )
+            ORDER BY lr.city_ord
+            SEPARATOR ', '
+        ) AS city_list
+    FROM location_rows lr
+    GROUP BY lr.job_posting_id
 ),
 
 country_rows AS (
@@ -51,69 +92,6 @@ country_agg AS (
         MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita
     FROM country_rows cr
     GROUP BY cr.job_posting_id
-),
-
-ita_cities AS (
-    SELECT
-        jp.id AS job_posting_id,
-        jt.ord AS city_ord,
-        TRIM(SUBSTRING_INDEX(jt.city_label, ' - ', 1)) AS city_name,
-        CASE
-            WHEN jt.city_label REGEXP ' - [A-Z]{2,3}$'
-                THEN TRIM(SUBSTRING_INDEX(jt.city_label, ' - ', -1))
-            ELSE 'Italia'
-        END AS state_name
-    FROM job_postings.job_postings_1 jp
-    INNER JOIN JSON_TABLE(
-        CASE
-            WHEN JSON_VALID(jp.locations) THEN jp.locations
-            ELSE '{"cities":[]}'
-        END,
-        '$.cities[*]'
-        COLUMNS (
-            ord FOR ORDINALITY,
-            city_label VARCHAR(255) PATH '$.label',
-            country_code VARCHAR(10) PATH '$.country_code'
-        )
-    ) jt ON TRUE
-    WHERE jt.country_code = 'ITA'
-      AND NULLIF(TRIM(jt.city_label), '') IS NOT NULL
-),
-
-city_list_agg AS (
-    SELECT
-        ic.job_posting_id,
-        COUNT(*) AS city_count,
-        GROUP_CONCAT(
-            DISTINCT ic.city_name
-            ORDER BY ic.city_ord
-            SEPARATOR ', '
-        ) AS city_list
-    FROM ita_cities ic
-    GROUP BY ic.job_posting_id
-),
-
--- Jobs with ITA but no usable city rows get a single fallback location.
-location_rows AS (
-    SELECT
-        ic.job_posting_id,
-        ic.city_ord,
-        ic.city_name AS location,
-        ic.state_name AS state
-    FROM ita_cities ic
-
-    UNION ALL
-
-    SELECT
-        ca.job_posting_id,
-        0 AS city_ord,
-        'Italy' AS location,
-        'Italia' AS state
-    FROM country_agg ca
-    LEFT JOIN city_list_agg cla
-        ON cla.job_posting_id = ca.job_posting_id
-    WHERE ca.has_ita = 1
-      AND COALESCE(cla.city_count, 0) = 0
 ),
 
 workmode_rows AS (
@@ -241,8 +219,9 @@ prepared AS (
         e.product,
         e.priority,
         ec.total_jobs,
-        COALESCE(cla.city_count, 0) AS city_count,
-        cla.city_list,
+        COALESCE(la.city_count, 0) AS city_count,
+        la.first_city_label,
+        la.city_list,
         wa.all_workmodes,
         sf.salary,
         CASE
@@ -254,8 +233,8 @@ prepared AS (
         ON e.id = jp.employers_id
     LEFT JOIN employer_counts ec
         ON ec.employers_id = jp.employers_id
-    LEFT JOIN city_list_agg cla
-        ON cla.job_posting_id = jp.id
+    LEFT JOIN location_agg la
+        ON la.job_posting_id = jp.id
     LEFT JOIN workmode_agg wa
         ON wa.job_posting_id = jp.id
     LEFT JOIN salary_formatted sf
@@ -298,7 +277,7 @@ normalized AS (
 )
 
 SELECT
-    CONCAT(n.id, '-', lr.city_ord) AS reference_id,
+    CAST(n.id AS CHAR) AS reference_id,
     n.id AS job_posting_id,
     n.position AS title,
 
@@ -339,8 +318,18 @@ SELECT
         '?utm_source=jobrapido'
     ) AS url,
 
-    lr.location AS location,
-    lr.state AS state,
+    CASE
+        WHEN NULLIF(TRIM(n.first_city_label), '') IS NULL THEN 'Italy'
+        ELSE TRIM(SUBSTRING_INDEX(n.first_city_label, ' - ', 1))
+    END AS location,
+
+    CASE
+        WHEN NULLIF(TRIM(n.first_city_label), '') IS NULL THEN 'Italia'
+        WHEN n.first_city_label REGEXP ' - [A-Z]{2,3}$'
+            THEN TRIM(SUBSTRING_INDEX(n.first_city_label, ' - ', -1))
+        ELSE 'Italia'
+    END AS state,
+
     'IT' AS country,
     NULL AS postalcode,
     n.employer_name AS company,
@@ -365,8 +354,6 @@ SELECT
     n.priority AS priority
 
 FROM normalized n
-INNER JOIN location_rows lr
-    ON lr.job_posting_id = n.id
 
 WHERE
     (
@@ -378,5 +365,4 @@ WHERE
 
 ORDER BY
     n.priority ASC,
-    n.created_at DESC,
-    lr.city_ord ASC;
+    n.created_at DESC;

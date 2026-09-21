@@ -106,7 +106,7 @@ def test_wrapping_jobrapido_xml_and_cpc(client: TestClient):
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         row = models.JobrapidoJobFeed(
-            reference_id="42-1",
+            reference_id="42",
             job_posting_id=42,
             title="Software Engineer",
             description="<p>" + ("x" * 100) + "</p>",
@@ -136,7 +136,7 @@ def test_wrapping_jobrapido_xml_and_cpc(client: TestClient):
     assert "<source>" in r.text
     assert "<jobs>" in r.text
     assert "<title><![CDATA[Software Engineer]]></title>" in r.text
-    assert "<reference_id><![CDATA[42-1]]></reference_id>" in r.text
+    assert "<reference_id><![CDATA[42]]></reference_id>" in r.text
     assert "<location><![CDATA[Milano]]></location>" in r.text
     assert "<state><![CDATA[MI]]></state>" in r.text
     assert "<country><![CDATA[IT]]></country>" in r.text
