@@ -100,10 +100,16 @@ def _insert_rows(
     *,
     chunk_size: int = 25,
 ) -> int:
-    """Multi-row INSERT in chunks; commit each chunk to avoid long transactions."""
+    """Multi-row INSERT in chunks; commit each chunk to avoid long transactions.
+
+    Ignores duplicate primary keys so a retry / concurrent sync that races on
+    the same ids does not abort the whole feed (seen on first Adzuna populate).
+    """
     if not rows:
         return 0
     col_sql = ", ".join(columns)
+    # MySQL: INSERT IGNORE; SQLite (tests): INSERT OR IGNORE
+    insert_kw = "INSERT IGNORE" if conn.dialect.name == "mysql" else "INSERT OR IGNORE"
     inserted = 0
     for chunk in _chunked(rows, chunk_size):
         value_groups: list[str] = []
@@ -112,10 +118,13 @@ def _insert_rows(
             value_groups.append("(" + ", ".join(f":{c}_{i}" for c in columns) + ")")
             for c in columns:
                 payload[f"{c}_{i}"] = row.get(c)
-        stmt = text(f"INSERT INTO {table} ({col_sql}) VALUES {', '.join(value_groups)}")
-        conn.execute(stmt, payload)
+        stmt = text(
+            f"{insert_kw} INTO {table} ({col_sql}) VALUES {', '.join(value_groups)}"
+        )
+        result = conn.execute(stmt, payload)
         conn.commit()
-        inserted += len(chunk)
+        # rowcount is rows actually written (excludes ignored duplicates).
+        inserted += max(int(result.rowcount or 0), 0)
     return inserted
 
 

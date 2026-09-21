@@ -151,6 +151,28 @@ FEED_CONFIGS: list[FeedConfig] = [
         id_column="id",
         description_column="description",
     ),
+    FeedConfig(
+        name="jobrapido",
+        table="jobrapido_job_feed",
+        sql_file="jobrapido_job_feed_select.sql",
+        columns=[
+            "id",
+            "title",
+            "description",
+            "url",
+            "location",
+            "country",
+            "remote",
+            "salary",
+            "company",
+            "category",
+            "date",
+            "cpc",
+            "priority",
+        ],
+        id_column="id",
+        description_column="description",
+    ),
 ]
 
 
@@ -211,6 +233,7 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
     whatjobs = _feed_or_zero(feeds, "whatjobs")
     hirematic = _feed_or_zero(feeds, "hirematic")
     adzuna = _feed_or_zero(feeds, "adzuna")
+    jobrapido = _feed_or_zero(feeds, "jobrapido")
     with Session(dest_engine) as session:
         row = JobFeedPipelineRun(
             started_at=datetime.fromisoformat(report["started_at"]),
@@ -236,6 +259,9 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
             adzuna_inserted=adzuna.inserted,
             adzuna_deleted=adzuna.deleted,
             adzuna_total=adzuna.total,
+            jobrapido_inserted=jobrapido.inserted,
+            jobrapido_deleted=jobrapido.deleted,
+            jobrapido_total=jobrapido.total,
             error_message=report.get("error_message"),
         )
         session.add(row)

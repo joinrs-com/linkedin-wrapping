@@ -10,6 +10,7 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 - GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia)
 - GET `/wrapping/hirematic` – XML Appcast Hirematic da `hirematic_job_feed`
 - GET `/wrapping/adzuna` – XML Adzuna da `adzuna_job_feed` (Italia, CPC da priority)
+- GET `/wrapping/jobrapido` – XML Job Rapido da `jobrapido_job_feed` (stesso schema/CPC di Adzuna)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -156,6 +157,12 @@ CPC da priority: `1→0.08`, `2→0.07`, `3→0.03`, `4→0.03`, `5→0`. URL co
 </jobs>
 ```
 
+### GET /wrapping/jobrapido
+
+Feed **Job Rapido** per annunci in Italia (priority 1–5). Legge da `lw.jobrapido_job_feed`, aggiornata dalla pipeline automatica.
+
+Stesso schema XML e stessi CPC di Adzuna; URL con `utm_source=jobrapido`.
+
 ### GET /
 
 Root endpoint with service information.
@@ -165,7 +172,7 @@ Root endpoint with service information.
 `scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE):
 
 1. OpenAI su job **nuovi** priority 1–3 con location Italia → `job_description_enriched`
-2. Sync `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`
+2. Sync `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`
 
 **Variabili `.env`:**
 

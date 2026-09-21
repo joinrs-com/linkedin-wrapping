@@ -22,3 +22,6 @@ GET http://localhost:3000/wrapping/whatjobs
 
 ### Get Wrapping – Adzuna (XML da adzuna_job_feed, Italia + CPC)
 GET http://localhost:3000/wrapping/adzuna
+
+### Get Wrapping – Job Rapido (XML da jobrapido_job_feed, stesso schema/CPC di Adzuna)
+GET http://localhost:3000/wrapping/jobrapido

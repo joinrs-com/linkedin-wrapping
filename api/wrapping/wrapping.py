@@ -11,6 +11,7 @@ from utils.database import get_session
 from api.wrapping.service import (
     get_adzuna_job_feed_rows,
     get_hirematic_job_feed_rows,
+    get_jobrapido_job_feed_rows,
     get_jooble_abroad_job_feed_rows,
     get_jooble_job_feed_rows,
     get_whatjobs_job_feed_rows,
@@ -167,7 +168,7 @@ def generate_whatjobs_xml(rows: list) -> str:
 
 
 def generate_adzuna_xml(rows: list) -> str:
-    """Adzuna-compatible XML (Italy feed)."""
+    """Adzuna / Job Rapido XML (same tag schema, Italy CPC feeds)."""
     parts: list[str] = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
     parts.append("<jobs>")
@@ -359,6 +360,16 @@ async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Resp
 async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Response:
     """GET /wrapping/adzuna: Adzuna XML from adzuna_job_feed (Italy, CPC from priority)."""
     rows = get_adzuna_job_feed_rows(session)
+    xml_content = generate_adzuna_xml(rows)
+    return Response(
+        content=xml_content.encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+async def get_wrapping_jobrapido(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/jobrapido: Job Rapido XML from jobrapido_job_feed (same schema/CPC as Adzuna)."""
+    rows = get_jobrapido_job_feed_rows(session)
     xml_content = generate_adzuna_xml(rows)
     return Response(
         content=xml_content.encode("utf-8"),

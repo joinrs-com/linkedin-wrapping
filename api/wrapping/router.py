@@ -14,4 +14,5 @@ router.get("/hirematic")(wrapping.get_wrapping_hirematic)
 router.get("/whatjobs")(wrapping.get_wrapping_whatjobs)
 router.get("/talent")(wrapping.get_wrapping_talent)
 router.get("/adzuna")(wrapping.get_wrapping_adzuna)
+router.get("/jobrapido")(wrapping.get_wrapping_jobrapido)
 

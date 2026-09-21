@@ -117,6 +117,9 @@ class JobFeedPipelineRun(SQLModel, table=True):
     adzuna_inserted: int = 0
     adzuna_deleted: int = 0
     adzuna_total: int = 0
+    jobrapido_inserted: int = 0
+    jobrapido_deleted: int = 0
+    jobrapido_total: int = 0
     error_message: str | None = Field(default=None, sa_column=Column("error_message", Text, nullable=True))
 
 
@@ -221,6 +224,27 @@ class AdzunaJobFeed(SQLModel, table=True):
     """Maps `lw.adzuna_job_feed`; Adzuna Italy feed with CPC from priority."""
 
     __tablename__ = "adzuna_job_feed"
+    __table_args__ = _resolve_schema()
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    description: str = Field(sa_column=Column("description", Text, nullable=False))
+    url: str = Field(sa_column=Column("url", Text, nullable=False))
+    location: str = Field(sa_column=Column("location", Text, nullable=False))
+    country: str = Field(sa_column=Column("country", String(10), nullable=False))
+    remote: str | None = None
+    salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
+    company: str | None = None
+    category: str | None = None
+    posted_date: date | None = Field(default=None, sa_column=Column("date", Date, nullable=True))
+    cpc: float | None = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
+    priority: int | None = None
+
+
+class JobrapidoJobFeed(SQLModel, table=True):
+    """Maps `lw.jobrapido_job_feed`; Job Rapido Italy feed (same schema/CPC as Adzuna)."""
+
+    __tablename__ = "jobrapido_job_feed"
     __table_args__ = _resolve_schema()
 
     id: Optional[int] = Field(default=None, primary_key=True)

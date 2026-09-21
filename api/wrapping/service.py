@@ -6,6 +6,7 @@ from api.wrapping.models import (
     AdzunaJobFeed,
     HirematicJobFeed,
     JobPostings,
+    JobrapidoJobFeed,
     JoobleAbroadJobFeed,
     JoobleJobFeed,
     WhatjobsJobFeed,
@@ -58,6 +59,16 @@ def get_adzuna_job_feed_rows(session: Session) -> List[AdzunaJobFeed]:
     statement = select(AdzunaJobFeed).order_by(
         asc(AdzunaJobFeed.priority),
         desc(AdzunaJobFeed.posted_date),
+    )
+    results = session.exec(statement)
+    return list(results.all())
+
+
+def get_jobrapido_job_feed_rows(session: Session) -> List[JobrapidoJobFeed]:
+    """All rows from jobrapido_job_feed for Job Rapido XML export."""
+    statement = select(JobrapidoJobFeed).order_by(
+        asc(JobrapidoJobFeed.priority),
+        desc(JobrapidoJobFeed.posted_date),
     )
     results = session.exec(statement)
     return list(results.all())

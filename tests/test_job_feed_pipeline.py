@@ -140,6 +140,7 @@ def test_insert_rows_uses_multi_row_insert_per_chunk(sqlite_pair):
 
     assert inserted == 7
     assert len(execute_calls) == 3  # chunks of 3, 3, 1
+    assert "INSERT OR IGNORE" in execute_calls[0].upper()
     assert execute_calls[0].count("VALUES") == 1
     assert execute_calls[0].count("(") >= 4  # column list + 3 value groups
     assert ":id_0" in execute_calls[0] and ":id_1" in execute_calls[0]
