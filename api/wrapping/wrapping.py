@@ -168,7 +168,7 @@ def generate_whatjobs_xml(rows: list) -> str:
 
 
 def generate_adzuna_xml(rows: list) -> str:
-    """Adzuna / Job Rapido XML (same tag schema, Italy CPC feeds)."""
+    """Adzuna XML (Italy CPC feed)."""
     parts: list[str] = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
     parts.append("<jobs>")
@@ -192,6 +192,72 @@ def generate_adzuna_xml(rows: list) -> str:
         parts.extend(_whatjobs_cdata_lines("priority", getattr(job, "priority", None)))
         parts.append("  </job>")
     parts.append("</jobs>")
+    return "\n".join(parts)
+
+
+def _jobrapido_dd_mm_yyyy(value: object | None) -> str | None:
+    """Format a date as DD/MM/YYYY for Job Rapido publishdate/expirydate."""
+    if value is None:
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%d/%m/%Y")
+    text = str(value).strip()
+    if not text:
+        return None
+    # Accept ISO YYYY-MM-DD from DB/drivers
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        try:
+            y, m, d = text[:10].split("-")
+            return f"{d}/{m}/{y}"
+        except ValueError:
+            return text
+    return text
+
+
+def generate_jobrapido_xml(rows: list) -> str:
+    """Job Rapido XML (official schema + CPC/priority)."""
+    parts: list[str] = []
+    parts.append('<?xml version="1.0" encoding="utf-8"?>')
+    parts.append("<source>")
+    parts.append("<jobs>")
+    for job in rows:
+        parts.append("\t<job>")
+        parts.extend(_whatjobs_cdata_lines("title", getattr(job, "title", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("location", getattr(job, "location", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("state", getattr(job, "state", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("country", getattr(job, "country", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("postalcode", getattr(job, "postalcode", None)))
+        parts.extend(_whatjobs_cdata_lines("company", getattr(job, "company", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("website", getattr(job, "website", None), required=True))
+        parts.extend(
+            _whatjobs_cdata_lines(
+                "publishdate",
+                _jobrapido_dd_mm_yyyy(getattr(job, "publishdate", None)),
+                required=True,
+            )
+        )
+        parts.extend(
+            _whatjobs_cdata_lines(
+                "expirydate",
+                _jobrapido_dd_mm_yyyy(getattr(job, "expirydate", None)),
+                required=True,
+            )
+        )
+        parts.extend(_whatjobs_cdata_lines("url", getattr(job, "url", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("description", getattr(job, "description", None), required=True))
+        parts.extend(
+            _whatjobs_cdata_lines("reference_id", getattr(job, "reference_id", None), required=True)
+        )
+        parts.extend(_whatjobs_cdata_lines("salary", getattr(job, "salary", None)))
+        parts.extend(_whatjobs_cdata_lines("education", getattr(job, "education", None)))
+        parts.extend(_whatjobs_cdata_lines("jobtype", getattr(job, "jobtype", None)))
+        parts.extend(_whatjobs_cdata_lines("category", getattr(job, "category", None)))
+        parts.extend(_whatjobs_cdata_lines("experience", getattr(job, "experience", None)))
+        parts.extend(_whatjobs_cdata_lines("cpc", getattr(job, "cpc", None)))
+        parts.extend(_whatjobs_cdata_lines("priority", getattr(job, "priority", None)))
+        parts.append("\t</job>")
+    parts.append("</jobs>")
+    parts.append("</source>")
     return "\n".join(parts)
 
 
@@ -368,9 +434,9 @@ async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Respon
 
 
 async def get_wrapping_jobrapido(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jobrapido: Job Rapido XML from jobrapido_job_feed (same schema/CPC as Adzuna)."""
+    """GET /wrapping/jobrapido: Job Rapido XML from jobrapido_job_feed (official schema + CPC)."""
     rows = get_jobrapido_job_feed_rows(session)
-    xml_content = generate_adzuna_xml(rows)
+    xml_content = generate_jobrapido_xml(rows)
     return Response(
         content=xml_content.encode("utf-8"),
         media_type="application/xml; charset=utf-8",

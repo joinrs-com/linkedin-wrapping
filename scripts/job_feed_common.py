@@ -69,6 +69,13 @@ def _normalize_id(value: Any, *, as_string: bool) -> str | int:
 
 
 def _job_id_from_row(row: dict[str, Any], id_column: str) -> int:
+    """Resolve numeric job posting id for enrichment lookup.
+
+    Prefer explicit ``job_posting_id`` when present (e.g. Job Rapido explode rows
+    whose primary key is ``reference_id``).
+    """
+    if row.get("job_posting_id") is not None:
+        return int(row["job_posting_id"])
     return int(row[id_column])
 
 

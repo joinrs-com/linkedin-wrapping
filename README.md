@@ -10,7 +10,7 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 - GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia)
 - GET `/wrapping/hirematic` – XML Appcast Hirematic da `hirematic_job_feed`
 - GET `/wrapping/adzuna` – XML Adzuna da `adzuna_job_feed` (Italia, CPC da priority)
-- GET `/wrapping/jobrapido` – XML Job Rapido da `jobrapido_job_feed` (stesso schema/CPC di Adzuna)
+- GET `/wrapping/jobrapido` – XML Job Rapido da `jobrapido_job_feed` (schema ufficiale, una riga per città, CPC da priority)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
@@ -161,7 +161,7 @@ CPC da priority: `1→0.08`, `2→0.07`, `3→0.03`, `4→0.03`, `5→0`. URL co
 
 Feed **Job Rapido** per annunci in Italia (priority 1–5). Legge da `lw.jobrapido_job_feed`, aggiornata dalla pipeline automatica.
 
-Stesso schema XML e stessi CPC di Adzuna; URL con `utm_source=jobrapido`.
+Schema XML ufficiale (`<source><jobs>`): `title`, `location`, `state`, `country`, `company`, `website`, `publishdate`/`expirydate` (DD/MM/YYYY), `url`, `description`, `reference_id`, più `cpc`/`priority` come Adzuna. Una riga per città italiana; URL con `utm_source=jobrapido`.
 
 ### GET /
 
@@ -188,7 +188,7 @@ Report ultimo run:
 SELECT * FROM job_feed_pipeline_run ORDER BY id DESC LIMIT 1;
 ```
 
-Dopo il deploy, esegui le migrazioni fino a `0015`:
+Dopo il deploy, esegui le migrazioni fino a `0017`:
 
 ```bash
 cd api/wrapping && alembic upgrade head

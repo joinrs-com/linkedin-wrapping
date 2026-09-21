@@ -68,7 +68,7 @@ def get_jobrapido_job_feed_rows(session: Session) -> List[JobrapidoJobFeed]:
     """All rows from jobrapido_job_feed for Job Rapido XML export."""
     statement = select(JobrapidoJobFeed).order_by(
         asc(JobrapidoJobFeed.priority),
-        desc(JobrapidoJobFeed.posted_date),
+        desc(JobrapidoJobFeed.publishdate),
     )
     results = session.exec(statement)
     return list(results.all())

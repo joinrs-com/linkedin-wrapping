@@ -102,21 +102,28 @@ def test_wrapping_adzuna_xml_and_cpc(client: TestClient):
 
 
 def test_wrapping_jobrapido_xml_and_cpc(client: TestClient):
-    """Job Rapido XML: same schema as Adzuna, utm_source=jobrapido."""
+    """Job Rapido XML: official schema, DD/MM/YYYY dates, CPC, utm_source=jobrapido."""
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         row = models.JobrapidoJobFeed(
-            id=42,
+            reference_id="42-1",
+            job_posting_id=42,
             title="Software Engineer",
             description="<p>" + ("x" * 100) + "</p>",
             url="https://www.joinrs.com/jobs/42?utm_source=jobrapido",
             location="Milano",
+            state="MI",
             country="IT",
-            remote="Remote",
-            salary="30000 EUR",
+            postalcode=None,
             company="Acme",
-            category="Remote, Senior",
-            posted_date=date(2026, 9, 1),
+            website="www.joinrs.com",
+            publishdate=date(2026, 9, 1),
+            expirydate=date(2026, 10, 31),
+            salary="30000 EUR",
+            education=None,
+            jobtype="fulltime",
+            category="Remote",
+            experience="Senior",
             cpc=0.08,
             priority=1,
         )
@@ -126,10 +133,16 @@ def test_wrapping_jobrapido_xml_and_cpc(client: TestClient):
     r = client.get("/wrapping/jobrapido")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
+    assert "<source>" in r.text
     assert "<jobs>" in r.text
     assert "<title><![CDATA[Software Engineer]]></title>" in r.text
-    assert "<id><![CDATA[42]]></id>" in r.text
+    assert "<reference_id><![CDATA[42-1]]></reference_id>" in r.text
+    assert "<location><![CDATA[Milano]]></location>" in r.text
+    assert "<state><![CDATA[MI]]></state>" in r.text
     assert "<country><![CDATA[IT]]></country>" in r.text
+    assert "<website><![CDATA[www.joinrs.com]]></website>" in r.text
+    assert "<publishdate><![CDATA[01/09/2026]]></publishdate>" in r.text
+    assert "<expirydate><![CDATA[31/10/2026]]></expirydate>" in r.text
     assert "<cpc><![CDATA[" in r.text
     assert "0.08" in r.text.split("<cpc>")[1].split("</cpc>")[0]
     assert "<priority><![CDATA[1]]></priority>" in r.text

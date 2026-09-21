@@ -4,7 +4,7 @@ import os
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Column, Date, Numeric, String, Text
+from sqlalchemy import BigInteger, Column, Date, Numeric, String, Text
 from sqlalchemy.engine.url import make_url
 from sqlmodel import SQLModel, Field
 
@@ -242,21 +242,28 @@ class AdzunaJobFeed(SQLModel, table=True):
 
 
 class JobrapidoJobFeed(SQLModel, table=True):
-    """Maps `lw.jobrapido_job_feed`; Job Rapido Italy feed (same schema/CPC as Adzuna)."""
+    """Maps `lw.jobrapido_job_feed`; Job Rapido Italy feed (official XML schema + CPC)."""
 
     __tablename__ = "jobrapido_job_feed"
     __table_args__ = _resolve_schema()
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    reference_id: str = Field(primary_key=True, max_length=64)
+    job_posting_id: int = Field(sa_column=Column("job_posting_id", BigInteger, nullable=False))
     title: str
     description: str = Field(sa_column=Column("description", Text, nullable=False))
     url: str = Field(sa_column=Column("url", Text, nullable=False))
     location: str = Field(sa_column=Column("location", Text, nullable=False))
+    state: str = Field(sa_column=Column("state", String(100), nullable=False))
     country: str = Field(sa_column=Column("country", String(10), nullable=False))
-    remote: str | None = None
+    postalcode: str | None = Field(default=None, sa_column=Column("postalcode", String(20), nullable=True))
+    company: str = Field(sa_column=Column("company", String(255), nullable=False))
+    website: str = Field(sa_column=Column("website", String(255), nullable=False))
+    publishdate: date = Field(sa_column=Column("publishdate", Date, nullable=False))
+    expirydate: date = Field(sa_column=Column("expirydate", Date, nullable=False))
     salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
-    company: str | None = None
+    education: str | None = Field(default=None, sa_column=Column("education", String(255), nullable=True))
+    jobtype: str | None = Field(default=None, sa_column=Column("jobtype", String(100), nullable=True))
     category: str | None = None
-    posted_date: date | None = Field(default=None, sa_column=Column("date", Date, nullable=True))
+    experience: str | None = Field(default=None, sa_column=Column("experience", String(255), nullable=True))
     cpc: float | None = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
     priority: int | None = None
