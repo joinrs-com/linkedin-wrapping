@@ -6,7 +6,7 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 - GET `/wrapping/jooble` – XML Jooble da `jooble_job_feed` (annunci Italia, pipeline automatica)
 - GET `/wrapping/talent` – stesso XML di Jooble, description HTML sanitizzata per Talent.com
-- GET `/wrapping/jooble/abroad` – XML Jooble separato per annunci enterprise all'estero (`jooble_abroad_job_feed`, refresh manuale)
+- GET `/wrapping/jooble/abroad` – XML Jooble per annunci enterprise all'estero (`jooble_abroad_job_feed`, pipeline automatica, senza OpenAI)
 - GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia)
 - GET `/wrapping/hirematic` – XML Appcast Hirematic da `hirematic_job_feed`
 - GET `/wrapping/adzuna` – XML Adzuna da `adzuna_job_feed` (Italia, CPC da priority)
@@ -15,6 +15,21 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 - Helm chart for Kubernetes deployment
 - CI/CD with GitHub Actions
 - Unit tests using pytest
+
+## Sponsorship feed XML
+
+Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
+
+| XML | Country | Priority | Note |
+| --- | --- | --- | --- |
+| **LinkedIn** `/wrapping` | — | — | **Rimosso** (endpoint 404; non più in pipeline). SQL legacy in `job_postings_select.sql` non esposto. |
+| **Jooble** `/wrapping/jooble` | solo ITA (`has_ita=1`) | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist employer `1179402`; tabella `jooble_job_feed`; pipeline automatica |
+| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella `jooble_job_feed` (description HTML sanitizzata Talent) |
+| **WhatJobs** `/wrapping/whatjobs` | solo ITA | 1–5 | stessi product/exclude di Jooble; `region` tipo Città, Italy; `whatjobs_job_feed` |
+| **Hirematic** `/wrapping/hirematic` | IT + ES (prima location ITA/ESP) | 1–3 (+ whitelist) | product `one`/`pro`; whitelist employer `2434743`, `829928` (Renfe); CPC null; `hirematic_job_feed` |
+| **Jooble abroad** `/wrapping/jooble/abroad` | non Italia-only | 1–4; P5 solo ESP | solo combo employer/product/priority che hanno anche job ITA; pipeline automatica (no OpenAI); `jooble_abroad_job_feed` |
+| **Adzuna** `/wrapping/adzuna` | solo ITA | 1–5 | CPC `1→0.08`, `2→0.07`, `3/4→0.03`, `5→0`; una riga per job (prima location); `adzuna_job_feed` |
+| **Job Rapido** `/wrapping/jobrapido` | solo ITA | 1–5 | stessi CPC di Adzuna; schema XML ufficiale; una riga per job (prima location, come Adzuna); `jobrapido_job_feed` |
 
 ## Setup
 
@@ -91,21 +106,11 @@ python scripts/run_job_feed_pipeline.py
 
 ### GET /wrapping/jooble/abroad
 
-Feed Jooble **separato** per annunci enterprise con location non solo in Italia. Legge da `lw.jooble_abroad_job_feed` (refresh manuale giornaliero, come Hirematic).
+Feed Jooble **separato** per annunci enterprise con location non solo in Italia. Legge da `lw.jooble_abroad_job_feed`, aggiornata dalla pipeline automatica (stesso CronJob di Jooble/Adzuna).
 
-Stesso schema XML di `/wrapping/jooble`, con in più `<priority>`, `<employers_id>` e `<countries>`. La description è pre-formattata in SQL (non passa da OpenAI).
+Priority **1–4** per qualsiasi location non Italia-only; priority **5** solo se c’è una location in Spagna (`ESP`). Stesso schema XML di `/wrapping/jooble`, con in più `<priority>`, `<employers_id>` e `<countries>`. La description è pre-formattata in SQL e **non** passa da OpenAI.
 
-**Refresh manuale:**
-
-```bash
-# 1. Svuota tabella
-mysql ... < scripts/sql/jooble_abroad_job_feed_truncate.sql
-
-# 2. Esegui SELECT ed importa in lw.jooble_abroad_job_feed
-# scripts/sql/jooble_abroad_job_feed_select.sql
-```
-
-Dopo `alembic upgrade head` la tabella viene creata automaticamente.
+Dopo `alembic upgrade head` (fino a `0018`) la tabella e le stats pipeline esistono già.
 
 ### GET /wrapping/whatjobs
 
@@ -172,7 +177,7 @@ Root endpoint with service information.
 `scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE):
 
 1. OpenAI su job **nuovi** priority 1–3 con location Italia → `job_description_enriched`
-2. Sync `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`
+2. Sync `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`, `jooble_abroad_job_feed`
 
 **Variabili `.env`:**
 
@@ -188,7 +193,7 @@ Report ultimo run:
 SELECT * FROM job_feed_pipeline_run ORDER BY id DESC LIMIT 1;
 ```
 
-Dopo il deploy, esegui le migrazioni fino a `0017`:
+Dopo il deploy, esegui le migrazioni fino a `0018`:
 
 ```bash
 cd api/wrapping && alembic upgrade head

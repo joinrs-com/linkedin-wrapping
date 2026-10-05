@@ -181,6 +181,32 @@ FEED_CONFIGS: list[FeedConfig] = [
         description_column="description",
         string_id=True,
     ),
+    FeedConfig(
+        name="jooble_abroad",
+        table="jooble_abroad_job_feed",
+        sql_file="jooble_abroad_job_feed_select.sql",
+        columns=[
+            "id",
+            "position",
+            "employers_name",
+            "employers_id",
+            "priority",
+            "description",
+            "company",
+            "apply_url",
+            "company_id",
+            "location",
+            "countries",
+            "workplace_types",
+            "experience_level",
+            "jobtype",
+            "partner_job_id",
+            "last_build_date",
+            "salary",
+        ],
+        id_column="id",
+        description_column=None,
+    ),
 ]
 
 
@@ -242,6 +268,7 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
     hirematic = _feed_or_zero(feeds, "hirematic")
     adzuna = _feed_or_zero(feeds, "adzuna")
     jobrapido = _feed_or_zero(feeds, "jobrapido")
+    jooble_abroad = _feed_or_zero(feeds, "jooble_abroad")
     with Session(dest_engine) as session:
         row = JobFeedPipelineRun(
             started_at=datetime.fromisoformat(report["started_at"]),
@@ -270,6 +297,9 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
             jobrapido_inserted=jobrapido.inserted,
             jobrapido_deleted=jobrapido.deleted,
             jobrapido_total=jobrapido.total,
+            jooble_abroad_inserted=jooble_abroad.inserted,
+            jooble_abroad_deleted=jooble_abroad.deleted,
+            jooble_abroad_total=jooble_abroad.total,
             error_message=report.get("error_message"),
         )
         session.add(row)

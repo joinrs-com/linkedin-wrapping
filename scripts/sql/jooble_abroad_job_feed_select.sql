@@ -1,10 +1,7 @@
 -- Enterprise jobs abroad for Jooble sponsorship feed.
--- Output columns match lw.jooble_abroad_job_feed for CSV export / INSERT.
---
--- Workflow:
---   1. scripts/sql/jooble_abroad_job_feed_truncate.sql
---   2. Run this SELECT, export results, load into lw.jooble_abroad_job_feed
---   3. GET /wrapping/jooble/abroad
+-- Output columns match lw.jooble_abroad_job_feed.
+-- Synced incrementally by scripts/run_job_feed_pipeline.py (no OpenAI overlay).
+-- Priority 1–4: any non-Italy-only location. Priority 5: Spain (ESP) only.
 
 WITH employer_counts AS (
     SELECT
@@ -93,6 +90,7 @@ country_agg AS (
     SELECT
         cr.job_posting_id,
         MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita,
+        MAX(CASE WHEN cr.country_code = 'ESP' THEN 1 ELSE 0 END) AS has_esp,
         COUNT(DISTINCT cr.country_code) AS country_count,
         GROUP_CONCAT(
             DISTINCT cr.country_code
@@ -162,6 +160,7 @@ prepared AS (
 
         COALESCE(la.city_count, 0) AS city_count,
         COALESCE(ca.has_ita, 0) AS has_ita,
+        COALESCE(ca.has_esp, 0) AS has_esp,
         COALESCE(ca.country_count, 0) AS country_count,
 
         la.first_city_label,
@@ -344,7 +343,10 @@ JOIN eligible_combinations ec
 
 WHERE
     n.product IN ('pro', 'one', 'pro_unlimited')
-    AND n.priority IN (1, 2, 3, 4)
+    AND (
+        n.priority IN (1, 2, 3, 4)
+        OR (n.priority = 5 AND n.has_esp = 1)
+    )
     AND NOT (
         n.has_ita = 1
         AND n.country_count = 1

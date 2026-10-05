@@ -120,6 +120,9 @@ class JobFeedPipelineRun(SQLModel, table=True):
     jobrapido_inserted: int = 0
     jobrapido_deleted: int = 0
     jobrapido_total: int = 0
+    jooble_abroad_inserted: int = 0
+    jooble_abroad_deleted: int = 0
+    jooble_abroad_total: int = 0
     error_message: str | None = Field(default=None, sa_column=Column("error_message", Text, nullable=True))
 
 
@@ -172,7 +175,7 @@ class JoobleJobFeed(SQLModel, table=True):
 
 
 class JoobleAbroadJobFeed(SQLModel, table=True):
-    """Maps `lw.jooble_abroad_job_feed`; manual daily refresh for Jooble enterprise abroad feed."""
+    """Maps `lw.jooble_abroad_job_feed`; Jooble enterprise abroad feed (pipeline, no OpenAI)."""
 
     __tablename__ = "jooble_abroad_job_feed"
     __table_args__ = _resolve_schema()
