@@ -348,37 +348,29 @@ SELECT
     -- NULL se isAvailable = false o campo assente
     n.salary AS `salary`,
 
-    -- [OBBLIGATORIO] Descrizione arricchita con tag tracking
-    CONCAT(
-        '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
-        '<br><br>',
-        '<p><em>Il processo di selezione sarà interamente gestito da ', n.employer_name, '.</em></p>',
-        '<br><br>',
-        CASE
-            WHEN n.city_count > 1 THEN CONCAT(
-                '<p><em>Questa opportunità è in ',
-                n.city_list,
-                '.</em></p><br><br>'
-            )
-            ELSE ''
-        END,
-        '<p>--</p>',
-        '<p>', n.description, '</p>',
-        '<p>--</p>',
-        '<p><strong>',
-        TRIM(CONCAT(
-            CASE WHEN n.all_workmodes LIKE '%Remote%'        THEN '[#LI-REMOTE] '   ELSE '' END,
-            CASE WHEN n.city_count > 1                       THEN '[#J-MCITY] '     ELSE '' END,
-            CASE WHEN n.product = 'pro'                      THEN '[#J-ENTERPRISE] ' ELSE '' END,
-            CASE WHEN n.product = 'one'                      THEN '[#J-ONE] '       ELSE '' END,
-            CASE WHEN COALESCE(n.total_jobs, 0) < 15         THEN '[#J-MIN] '       ELSE '' END
-        )),
-        '</strong></p>',
-        CASE
-            WHEN n.is_easy_apply = 1 THEN '<p><strong>[#J-INTERNAL]</strong></p>'
-            ELSE ''
-        END
-    ) AS `description`,
+    -- Descrizione: Joinrs employers = body only; others = intro (+ multi-city note). No [#J-…] tags.
+    CASE
+        WHEN n.employers_id IN (
+            327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
+        ) THEN CONCAT('<p>', n.description, '</p>')
+        ELSE CONCAT(
+            '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
+            '<br><br>',
+            '<p><em>Il processo di selezione sarà interamente gestito da ', n.employer_name, '.</em></p>',
+            '<br><br>',
+            CASE
+                WHEN n.city_count > 1 THEN CONCAT(
+                    '<p><em>Questa opportunità è in ',
+                    n.city_list,
+                    '.</em></p><br><br>'
+                )
+                ELSE ''
+            END,
+            '<p>--</p>',
+            '<p>', n.description, '</p>',
+            '<p>--</p>'
+        )
+    END AS `description`,
 
     -- [OBBLIGATORIO] Nome azienda (employer, non "Joinrs")
     n.employer_name AS `company`,

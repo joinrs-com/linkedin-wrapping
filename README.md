@@ -23,13 +23,15 @@ Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
 | XML | Country | Priority | Note |
 | --- | --- | --- | --- |
 | **LinkedIn** `/wrapping` | — | — | **Rimosso** (endpoint 404; non più in pipeline). SQL legacy in `job_postings_select.sql` non esposto. |
-| **Jooble** `/wrapping/jooble` | solo ITA (`has_ita=1`) | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist employer `1179402`; tabella `jooble_job_feed`; pipeline automatica |
+| **Jooble** `/wrapping/jooble` | solo ITA (`has_ita=1`) | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist employer `1179402`; **una riga per città ITA** (`id`/`partnerJobId` = `job_id-n`); `jooble_job_feed`; pipeline automatica |
 | **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella `jooble_job_feed` (description HTML sanitizzata Talent) |
 | **WhatJobs** `/wrapping/whatjobs` | solo ITA | 1–5 | stessi product/exclude di Jooble; `region` tipo Città, Italy; `whatjobs_job_feed` |
 | **Hirematic** `/wrapping/hirematic` | IT + ES (prima location ITA/ESP) | 1–3 (+ whitelist) | product `one`/`pro`; whitelist employer `2434743`, `829928` (Renfe); CPC null; `hirematic_job_feed` |
-| **Jooble abroad** `/wrapping/jooble/abroad` | non Italia-only | 1–4; P5 solo ESP | solo combo employer/product/priority che hanno anche job ITA; pipeline automatica (no OpenAI); `jooble_abroad_job_feed` |
-| **Adzuna** `/wrapping/adzuna` | solo ITA | 1–5 | CPC `1→0.08`, `2→0.07`, `3/4→0.03`, `5→0`; una riga per job (prima location); `adzuna_job_feed` |
-| **Job Rapido** `/wrapping/jobrapido` | solo ITA | 1–5 | stessi CPC di Adzuna; schema XML ufficiale; una riga per job (prima location, come Adzuna); `jobrapido_job_feed` |
+| **Jooble abroad** `/wrapping/jooble/abroad` | non Italia-only | 1–4; P5 solo ESP | combo employer/product/priority con anche job ITA; **una riga per città** (`id`/`partnerJobId` = `job_id-n`); intro EN solo non-Joinrs; `jooble_abroad_job_feed` |
+| **Adzuna** `/wrapping/adzuna` | solo ITA | 1–5 | CPC `1→0.08`, `2→0.07`, `3/4→0.03`, `5→0`; **una riga per città ITA** (`id` = `job_id-n`); `adzuna_job_feed` |
+| **Job Rapido** `/wrapping/jobrapido` | solo ITA | 1–5 | stessi CPC di Adzuna; schema XML ufficiale; una riga per job (prima location); `jobrapido_job_feed` |
+
+**Description (feed Italia):** employer Joinrs (`327107`, `829928`, `829944`, `829946`, `829948`, `829951`, `848251`, `2006564`, `4004682`) → solo body, senza intro multi-location. Altri employer → intro + body. Nessun tag sponsorship (`[#LI-REMOTE]`, `[#J-MCITY]`, `[#J-ENTERPRISE]`, `[#J-ONE]`, `[#J-MIN]`, `[#J-INTERNAL]`) nelle description (anche abroad: solo rimozione tag). URL applicative restano `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
 
 ## Setup
 
@@ -75,12 +77,12 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 
 Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Legge da `lw.jooble_job_feed` (annunci Italia). Aggiornata automaticamente da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome via CronJob K8s).
 
-L'`apply_url` è il link canonico del job senza query (es. `https://www.joinrs.com/jobs/{id}`). Include `<salary>` quando disponibile.
+Una riga per città ITA: `partnerJobId` = `{job_posting_id}-{ord}` (es. `12345-1`). L'`apply_url` è il link canonico senza query e senza ordinalità (es. `https://www.joinrs.com/jobs/12345`). Include `<salary>` quando disponibile. Dopo `alembic upgrade head` (fino a `0019`) la PK è `VARCHAR` + colonna `job_posting_id`.
 
 **Test manuale pipeline:**
 
 ```bash
-# .env: DATABASE_URL (lw), JOB_FEED_SOURCE_DATABASE_URL (production), OPENAI_API_KEY
+# .env: DATABASE_URL (lw), JOB_FEED_SOURCE_DATABASE_URL (production)
 python scripts/run_job_feed_pipeline.py
 ```
 
@@ -90,7 +92,7 @@ python scripts/run_job_feed_pipeline.py
 <source>
   <lastBuildDate> Mon, 08 Jan 2024 11:34:23 GMT </lastBuildDate>
   <job>
-    <partnerJobId><![CDATA[1]]></partnerJobId>
+    <partnerJobId><![CDATA[1-1]]></partnerJobId>
     <company><![CDATA[Example, Inc.]]></company>
     <title><![CDATA[Software Engineer]]></title>
     <description><![CDATA[<strong>Awesome role</strong>]]></description>
@@ -108,9 +110,9 @@ python scripts/run_job_feed_pipeline.py
 
 Feed Jooble **separato** per annunci enterprise con location non solo in Italia. Legge da `lw.jooble_abroad_job_feed`, aggiornata dalla pipeline automatica (stesso CronJob di Jooble/Adzuna).
 
-Priority **1–4** per qualsiasi location non Italia-only; priority **5** solo se c’è una location in Spagna (`ESP`). Stesso schema XML di `/wrapping/jooble`, con in più `<priority>`, `<employers_id>` e `<countries>`. La description è pre-formattata in SQL e **non** passa da OpenAI.
+Priority **1–4** per qualsiasi location non Italia-only; priority **5** solo se c’è una location in Spagna (`ESP`). Una riga per città: `partnerJobId` = `{job_posting_id}-{ord}`; URL applicativa senza `-n`. Intro in inglese solo per employer non-Joinrs; Joinrs = solo body. Stesso schema XML di `/wrapping/jooble`, con in più `<priority>`, `<employers_id>` e `<countries>`. Description pre-formattata in SQL (no OpenAI).
 
-Dopo `alembic upgrade head` (fino a `0018`) la tabella e le stats pipeline esistono già.
+Dopo `alembic upgrade head` (fino a `0020`) la PK è `VARCHAR` + `job_posting_id`.
 
 ### GET /wrapping/whatjobs
 
@@ -140,7 +142,7 @@ Il `link` è il URL canonico del job senza query (es. `https://www.joinrs.com/jo
 
 Feed **Adzuna** per annunci in Italia (priority 1–5). Legge da `lw.adzuna_job_feed`, aggiornata dalla pipeline automatica.
 
-CPC da priority: `1→0.08`, `2→0.07`, `3→0.03`, `4→0.03`, `5→0`. URL con `utm_source=adzuna`.
+Una riga per città ITA: `<id>` = `{job_posting_id}-{ord}` (es. `3218063-1`). CPC da priority: `1→0.08`, `2→0.07`, `3→0.03`, `4→0.03`, `5→0`. URL con `utm_source=adzuna` (senza `-n` nel path).
 
 **Response:**
 ```xml
@@ -148,7 +150,7 @@ CPC da priority: `1→0.08`, `2→0.07`, `3→0.03`, `4→0.03`, `5→0`. URL co
 <jobs>
   <job>
     <title><![CDATA[Software Engineer]]></title>
-    <id><![CDATA[3218063]]></id>
+    <id><![CDATA[3218063-1]]></id>
     <description><![CDATA[<p>...</p>]]></description>
     <url><![CDATA[https://www.joinrs.com/jobs/3218063?utm_source=adzuna]]></url>
     <location><![CDATA[Milano]]></location>
@@ -174,16 +176,14 @@ Root endpoint with service information.
 
 ## Job feed pipeline (automatica)
 
-`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE):
+`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE). Lo step OpenAI sulle description è **disattivato** (le description restano quelle del SELECT SQL).
 
-1. OpenAI su job **nuovi** priority 1–3 con location Italia → `job_description_enriched`
-2. Sync `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`, `jooble_abroad_job_feed`
+Sync: `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`, `jooble_abroad_job_feed`.
 
 **Variabili `.env`:**
 
 - `DATABASE_URL` — joinrs-intelligence / `lw` (destinazione)
 - `JOB_FEED_SOURCE_DATABASE_URL` — mysql-production01 / `job_postings` (sorgente)
-- `OPENAI_API_KEY` — richiesta solo se ci sono nuovi job da arricchire
 
 **CronJob K8s:** 6:00 e 15:00 Europe/Rome (`helm-chart`, `jobFeedPipeline.enabled: true`).
 
@@ -197,12 +197,6 @@ Dopo il deploy, esegui le migrazioni fino a `0018`:
 
 ```bash
 cd api/wrapping && alembic upgrade head
-```
-
-**Recovery dopo errore OpenAI** (es. `401 invalid_api_key` durante il primo run): correggi `OPENAI_API_KEY`, poi svuota la tabella enriched prima di rilanciare, altrimenti i job già inseriti con description grezza non verranno riprocessati:
-
-```sql
-TRUNCATE TABLE job_description_enriched;
 ```
 
 ### GET /health
@@ -259,6 +253,5 @@ helm install linkedin-wrapping ./helm-chart \
 
 - `DATABASE_URL`: Database connection string (required, destinazione lw)
 - `JOB_FEED_SOURCE_DATABASE_URL`: MySQL production read (pipeline CronJob)
-- `OPENAI_API_KEY`: OpenAI key (pipeline enrichment)
 
 

@@ -70,7 +70,8 @@ def test_wrapping_adzuna_xml_and_cpc(client: TestClient):
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         row = models.AdzunaJobFeed(
-            id=42,
+            id="42-1",
+            job_posting_id=42,
             title="Software Engineer",
             description="<p>" + ("x" * 100) + "</p>",
             url="https://www.joinrs.com/jobs/42?utm_source=adzuna",
@@ -92,7 +93,7 @@ def test_wrapping_adzuna_xml_and_cpc(client: TestClient):
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<jobs>" in r.text
     assert "<title><![CDATA[Software Engineer]]></title>" in r.text
-    assert "<id><![CDATA[42]]></id>" in r.text
+    assert "<id><![CDATA[42-1]]></id>" in r.text
     assert "<country><![CDATA[IT]]></country>" in r.text
     assert "<cpc><![CDATA[" in r.text
     assert "0.08" in r.text.split("<cpc>")[1].split("</cpc>")[0]
@@ -155,9 +156,11 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         row = models.JoobleJobFeed(
-            id=1,
+            id="1-1",
+            job_posting_id=1,
             position="Test",
             apply_url="https://www.joinrs.com/jobs/1",
+            partner_job_id="1-1",
             last_build_date=_now,
             salary="25000 EUR",
         )
@@ -188,9 +191,11 @@ def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: Tes
         )
         s.add(
             models.JoobleJobFeed(
-                id=1,
+                id="1-1",
+                job_posting_id=1,
                 position="Only Jooble",
                 apply_url="https://www.joinrs.com/jobs/1",
+                partner_job_id="1-1",
                 last_build_date=_now,
             )
         )
@@ -221,13 +226,15 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
         )
         s.add(
             models.JoobleJobFeed(
-                id=1,
+                id="1-1",
+                job_posting_id=1,
                 position="Test",
                 company="Joinrs",
                 employers_name="NewEmployer",
                 employers_id=2341296,
                 priority=3,
                 apply_url="https://www.joinrs.com/jobs/1",
+                partner_job_id="1-1",
                 last_build_date=_now,
             )
         )
@@ -272,7 +279,8 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
     with next(get_sess()) as s:  # type: ignore
         s.add(
             models.JoobleJobFeed(
-                id=900001,
+                id="900001-1",
+                job_posting_id=900001,
                 position="Operator",
                 employers_name="Talenti",
                 employers_id=1,
@@ -286,7 +294,7 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
                 workplace_types="On-site",
                 experience_level="Entry Level",
                 jobtype="Full Time",
-                partner_job_id="900001",
+                partner_job_id="900001-1",
                 last_build_date=datetime.now(timezone.utc),
             )
         )
@@ -323,24 +331,22 @@ def test_wrapping_jooble_abroad_one_job(client: TestClient):
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         row = models.JoobleAbroadJobFeed(
-            id=3218063,
+            id="3218063-1",
+            job_posting_id=3218063,
             position="Software Engineer",
             employers_name="Acme Corp",
             employers_id=589893,
             priority=2,
             description="<p>Enterprise role abroad</p>",
             company="Joinrs",
-            apply_url=(
-                "https://www.joinrs.com/jobs/3218063/"
-                "?utm_source=linkedin&utm_medium=589893-2&utm_campaign=3218063-pro"
-            ),
+            apply_url="https://www.joinrs.com/jobs/3218063",
             company_id="829928",
-            location="Multi-country",
-            countries="DEU, FRA, ITA",
+            location="Berlin",
+            countries="DEU",
             workplace_types="Remote",
             experience_level="Mid Level",
             jobtype="Full Time",
-            partner_job_id="3218063",
+            partner_job_id="3218063-1",
             last_build_date=_now,
         )
         s.add(row)
@@ -351,7 +357,9 @@ def test_wrapping_jooble_abroad_one_job(client: TestClient):
     assert "<company><![CDATA[Acme Corp]]></company>" in r.text
     assert "<priority><![CDATA[2]]></priority>" in r.text
     assert "<employers_id><![CDATA[589893]]></employers_id>" in r.text
-    assert "<countries><![CDATA[DEU, FRA, ITA]]></countries>" in r.text
+    assert "<countries><![CDATA[DEU]]></countries>" in r.text
+    assert "<partnerJobId><![CDATA[3218063-1]]></partnerJobId>" in r.text
+    assert "<location><![CDATA[Berlin]]></location>" in r.text
     assert "<applyUrl><![CDATA[https://www.joinrs.com/jobs/3218063]]></applyUrl>" in r.text
     assert "utm_" not in r.text.split("<applyUrl>")[1].split("</applyUrl>")[0]
 

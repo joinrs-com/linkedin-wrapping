@@ -150,12 +150,13 @@ class HirematicJobFeed(SQLModel, table=True):
 
 
 class JoobleJobFeed(SQLModel, table=True):
-    """Maps `lw.jooble_job_feed`; Italy jobs for Jooble/Talent XML."""
+    """Maps `lw.jooble_job_feed`; Italy jobs for Jooble/Talent XML (one row per city)."""
 
     __tablename__ = "jooble_job_feed"
     __table_args__ = _resolve_schema()
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: str = Field(primary_key=True, max_length=64)
+    job_posting_id: int = Field(sa_column=Column("job_posting_id", BigInteger, nullable=False))
     position: str
     employers_name: str | None = None
     employers_id: int | None = None
@@ -175,12 +176,13 @@ class JoobleJobFeed(SQLModel, table=True):
 
 
 class JoobleAbroadJobFeed(SQLModel, table=True):
-    """Maps `lw.jooble_abroad_job_feed`; Jooble enterprise abroad feed (pipeline, no OpenAI)."""
+    """Maps `lw.jooble_abroad_job_feed`; Jooble abroad feed (one row per city, pipeline, no OpenAI)."""
 
     __tablename__ = "jooble_abroad_job_feed"
     __table_args__ = _resolve_schema()
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: str = Field(primary_key=True, max_length=64)
+    job_posting_id: int = Field(sa_column=Column("job_posting_id", BigInteger, nullable=False))
     position: str
     employers_name: str | None = None
     employers_id: int | None = None
@@ -224,12 +226,13 @@ class WhatjobsJobFeed(SQLModel, table=True):
 
 
 class AdzunaJobFeed(SQLModel, table=True):
-    """Maps `lw.adzuna_job_feed`; Adzuna Italy feed with CPC from priority."""
+    """Maps `lw.adzuna_job_feed`; Adzuna Italy feed (one row per city, CPC from priority)."""
 
     __tablename__ = "adzuna_job_feed"
     __table_args__ = _resolve_schema()
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: str = Field(primary_key=True, max_length=64)
+    job_posting_id: int = Field(sa_column=Column("job_posting_id", BigInteger, nullable=False))
     title: str
     description: str = Field(sa_column=Column("description", Text, nullable=False))
     url: str = Field(sa_column=Column("url", Text, nullable=False))

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Pipeline incrementale feed job: OpenAI su job nuovi P1-3 Italia, sync export senza TRUNCATE.
+Pipeline incrementale feed job: sync export senza TRUNCATE (OpenAI enrichment skipped).
 
 Uso:
     DATABASE_URL                    → joinrs-intelligence/lw (destinazione)
     JOB_FEED_SOURCE_DATABASE_URL    → mysql-production01 (sorgente)
-    OPENAI_API_KEY
 
     python scripts/run_job_feed_pipeline.py
 """
@@ -21,7 +20,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import text
 from sqlmodel import Session
 
 project_root = Path(__file__).resolve().parent.parent
@@ -36,7 +34,6 @@ import improve_job_descriptions as ijd  # noqa: E402
 from job_feed_common import (  # noqa: E402
     SyncResult,
     create_mysql_engine,
-    load_enriched_descriptions,
     load_sql,
     sync_feed_table,
 )
@@ -61,6 +58,7 @@ FEED_CONFIGS: list[FeedConfig] = [
         sql_file="jooble_job_feed_select.sql",
         columns=[
             "id",
+            "job_posting_id",
             "position",
             "employers_name",
             "employers_id",
@@ -80,6 +78,7 @@ FEED_CONFIGS: list[FeedConfig] = [
         ],
         id_column="id",
         description_column="description",
+        string_id=True,
     ),
     FeedConfig(
         name="whatjobs",
@@ -135,6 +134,7 @@ FEED_CONFIGS: list[FeedConfig] = [
         sql_file="adzuna_job_feed_select.sql",
         columns=[
             "id",
+            "job_posting_id",
             "title",
             "description",
             "url",
@@ -150,6 +150,7 @@ FEED_CONFIGS: list[FeedConfig] = [
         ],
         id_column="id",
         description_column="description",
+        string_id=True,
     ),
     FeedConfig(
         name="jobrapido",
@@ -187,6 +188,7 @@ FEED_CONFIGS: list[FeedConfig] = [
         sql_file="jooble_abroad_job_feed_select.sql",
         columns=[
             "id",
+            "job_posting_id",
             "position",
             "employers_name",
             "employers_id",
@@ -206,18 +208,13 @@ FEED_CONFIGS: list[FeedConfig] = [
         ],
         id_column="id",
         description_column=None,
+        string_id=True,
     ),
 ]
 
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _fetch_enrichment_inputs(source_conn) -> list[dict]:
-    sql = load_sql(project_root, "job_enrichment_input_select.sql")
-    rows = source_conn.execute(text(sql)).fetchall()
-    return [dict(r._mapping) for r in rows]
 
 
 def _build_report(
@@ -323,16 +320,9 @@ def run_pipeline() -> dict:
         # Fresh connections per phase: long-lived sockets die on MySQL wait_timeout
         # (seen as OperationalError 2013 during Sync adzuna after multi-hour runs).
         print("=" * 60)
-        print("Job feed pipeline — enrichment")
+        print("Job feed pipeline — OpenAI enrichment skipped")
         print("=" * 60)
-        with src_engine.connect() as src_conn:
-            enrichment_inputs = _fetch_enrichment_inputs(src_conn)
-        print(f"Job eleggibili attivi in produzione: {len(enrichment_inputs)}")
-        enrichment = ijd.run_enrichment_pipeline(enrichment_inputs, engine=dest_engine)
-
-        with dest_engine.connect() as dest_conn:
-            enriched = load_enriched_descriptions(dest_conn)
-        print(f"job_description_enriched: {len(enriched)} righe\n")
+        enriched: dict[int, str] = {}
 
         for cfg in FEED_CONFIGS:
             print("=" * 60)

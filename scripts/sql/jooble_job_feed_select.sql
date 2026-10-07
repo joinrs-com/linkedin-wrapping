@@ -1,57 +1,8 @@
 -- Italy jobs for Jooble/Talent feed (GET /wrapping/jooble, /wrapping/talent).
--- Output columns match lw.jooble_job_feed.
--- Enriched descriptions are merged in Python at INSERT time.
+-- Output columns match lw.jooble_job_feed (one row per Italian city; id = job_id-ord).
+-- Joinrs employers: body-only description (no intro). No [#J-…] / [#LI-…] tags.
 
-WITH employer_counts AS (
-    SELECT
-        jp.employers_id,
-        COUNT(*) AS total_jobs
-    FROM job_postings.job_postings_1 jp
-    GROUP BY jp.employers_id
-),
-
-location_rows AS (
-    SELECT
-        jp.id AS job_posting_id,
-        jt.ord AS city_ord,
-        jt.city_label,
-        jt.country_code
-    FROM job_postings.job_postings_1 jp
-    LEFT JOIN JSON_TABLE(
-        CASE
-            WHEN JSON_VALID(jp.locations) THEN jp.locations
-            ELSE '{"cities":[]}'
-        END,
-        '$.cities[*]'
-        COLUMNS (
-            ord FOR ORDINALITY,
-            city_label VARCHAR(255) PATH '$.label',
-            country_code VARCHAR(10) PATH '$.country_code'
-        )
-    ) jt ON TRUE
-),
-
-location_agg AS (
-    SELECT
-        lr.job_posting_id,
-        COUNT(lr.city_label) AS city_count,
-        MAX(CASE WHEN lr.city_ord = 1 THEN lr.city_label END) AS first_city_label,
-        GROUP_CONCAT(
-            DISTINCT TRIM(
-                CASE
-                    WHEN lr.city_label REGEXP ' - [A-Z]{2,3}$'
-                        THEN REGEXP_REPLACE(lr.city_label, ' - [A-Z]{2,3}$', '')
-                    ELSE lr.city_label
-                END
-            )
-            ORDER BY lr.city_ord
-            SEPARATOR ', '
-        ) AS city_list
-    FROM location_rows lr
-    GROUP BY lr.job_posting_id
-),
-
-country_rows AS (
+WITH country_rows AS (
     SELECT
         jp.id AS job_posting_id,
         jt.country_code
@@ -88,18 +39,59 @@ country_rows AS (
 country_agg AS (
     SELECT
         cr.job_posting_id,
-        MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita,
-        COUNT(DISTINCT NULLIF(cr.country_code, '')) AS country_count,
-        GROUP_CONCAT(
-            DISTINCT CASE
-                WHEN cr.country_code <> 'ITA'
-                THEN cr.country_code
-            END
-            ORDER BY cr.country_code
-            SEPARATOR ', '
-        ) AS countries
+        MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita
     FROM country_rows cr
     GROUP BY cr.job_posting_id
+),
+
+ita_cities AS (
+    SELECT
+        jp.id AS job_posting_id,
+        jt.ord AS city_ord,
+        TRIM(SUBSTRING_INDEX(jt.city_label, ' - ', 1)) AS city_name
+    FROM job_postings.job_postings_1 jp
+    INNER JOIN JSON_TABLE(
+        CASE
+            WHEN JSON_VALID(jp.locations) THEN jp.locations
+            ELSE '{"cities":[]}'
+        END,
+        '$.cities[*]'
+        COLUMNS (
+            ord FOR ORDINALITY,
+            city_label VARCHAR(255) PATH '$.label',
+            country_code VARCHAR(10) PATH '$.country_code'
+        )
+    ) jt ON TRUE
+    WHERE jt.country_code = 'ITA'
+      AND NULLIF(TRIM(jt.city_label), '') IS NOT NULL
+),
+
+city_list_agg AS (
+    SELECT
+        ic.job_posting_id,
+        COUNT(*) AS city_count
+    FROM ita_cities ic
+    GROUP BY ic.job_posting_id
+),
+
+location_rows AS (
+    SELECT
+        ic.job_posting_id,
+        ic.city_ord,
+        ic.city_name AS location
+    FROM ita_cities ic
+
+    UNION ALL
+
+    SELECT
+        ca.job_posting_id,
+        1 AS city_ord,
+        'Italy' AS location
+    FROM country_agg ca
+    LEFT JOIN city_list_agg cla
+        ON cla.job_posting_id = ca.job_posting_id
+    WHERE ca.has_ita = 1
+      AND COALESCE(cla.city_count, 0) = 0
 ),
 
 workmode_rows AS (
@@ -220,56 +212,32 @@ prepared AS (
         jp.id,
         jp.position,
         jp.description,
-        jp.url,
         jp.created_at,
-        jp.is_easy_apply,
         jp.employers_id,
         e.name AS employer_name,
         e.product,
         e.priority,
-        ec.total_jobs,
-
-        COALESCE(la.city_count, 0) AS city_count,
-        COALESCE(ca.has_ita, 0) AS has_ita,
-        COALESCE(ca.country_count, 0) AS country_count,
-
-        la.first_city_label,
-        la.city_list,
-        ca.countries,
         wa.all_workmodes,
         sf.salary,
-
-        '' AS ai_summary,
-
         CASE
             WHEN JSON_VALID(jp.seniority) THEN jp.seniority
             ELSE JSON_QUOTE(TRIM(COALESCE(jp.seniority, '')))
         END AS safe_seniority_json
-
     FROM job_postings.job_postings_1 jp
     JOIN employers.employers e
         ON e.id = jp.employers_id
-
-    LEFT JOIN employer_counts ec
-        ON ec.employers_id = jp.employers_id
-
-    LEFT JOIN location_agg la
-        ON la.job_posting_id = jp.id
-
-    LEFT JOIN country_agg ca
-        ON ca.job_posting_id = jp.id
-
     LEFT JOIN workmode_agg wa
         ON wa.job_posting_id = jp.id
-
     LEFT JOIN salary_formatted sf
         ON sf.job_posting_id = jp.id
+    INNER JOIN country_agg ca
+        ON ca.job_posting_id = jp.id
+        AND ca.has_ita = 1
 ),
 
 extracted AS (
     SELECT
         p.*,
-
         TRIM(
             COALESCE(
                 JSON_UNQUOTE(JSON_EXTRACT(p.safe_seniority_json, '$.name')),
@@ -282,14 +250,12 @@ extracted AS (
                 JSON_UNQUOTE(JSON_EXTRACT(p.safe_seniority_json, '$'))
             )
         ) AS raw_seniority
-
     FROM prepared p
 ),
 
 normalized AS (
     SELECT
         x.*,
-
         CASE
             WHEN LOWER(x.raw_seniority) IN ('junior', 'entry-level', 'entry level') THEN 'Entry Level'
             WHEN LOWER(x.raw_seniority) = 'internship' THEN 'Internship'
@@ -298,47 +264,31 @@ normalized AS (
             WHEN LOWER(x.raw_seniority) = 'senior' THEN 'Senior'
             ELSE TRIM(BOTH '"' FROM REPLACE(REPLACE(REPLACE(x.raw_seniority,'[',''),']',''),'''',''))
         END AS normalized_seniority
-
     FROM extracted x
 )
 
 SELECT
-    n.id AS id,
+    CONCAT(n.id, '-', lr.city_ord) AS id,
+    n.id AS job_posting_id,
     n.position AS position,
     n.employer_name AS employers_name,
     n.employers_id AS employers_id,
     n.priority AS priority,
 
-    CONCAT(
-        '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
-        '<br><br>',
-        '<p><em>Il processo di selezione sarà interamente gestito ', n.employer_name, '.</em></p>',
-        '<br><br>',
-        CASE
-            WHEN n.city_count > 1 THEN CONCAT(
-                '<p><em>Questa opportunità è disponibile in ',
-                n.city_list,
-                '.</em></p><br><br>'
-            )
-            ELSE ''
-        END,
-        '<p>--</p>',
-        '<p>', n.description, '</p>',
-        '<p>--</p>',
-        '<p><strong>',
-        TRIM(CONCAT(
-            CASE WHEN n.all_workmodes LIKE '%Remote%' THEN '[#LI-REMOTE] ' ELSE '' END,
-            CASE WHEN n.city_count > 1 THEN '[#J-MCITY] ' ELSE '' END,
-            CASE WHEN n.product = 'pro' THEN '[#J-ENTERPRISE] ' ELSE '' END,
-            CASE WHEN n.product = 'one' THEN '[#J-ONE] ' ELSE '' END,
-            CASE WHEN COALESCE(n.total_jobs, 0) < 15 THEN '[#J-MIN] ' ELSE '' END
-        )),
-        '</strong></p>',
-        CASE
-            WHEN n.is_easy_apply = 1 THEN '<p><strong>[#J-INTERNAL]</strong></p>'
-            ELSE ''
-        END
-    ) AS description,
+    CASE
+        WHEN n.employers_id IN (
+            327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
+        ) THEN CONCAT('<p>', n.description, '</p>')
+        ELSE CONCAT(
+            '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
+            '<br><br>',
+            '<p><em>Il processo di selezione sarà interamente gestito ', n.employer_name, '.</em></p>',
+            '<br><br>',
+            '<p>--</p>',
+            '<p>', n.description, '</p>',
+            '<p>--</p>'
+        )
+    END AS description,
 
     'Joinrs' AS company,
 
@@ -349,10 +299,7 @@ SELECT
 
     '829928' AS company_id,
 
-    COALESCE(
-        NULLIF(n.city_list, ''),
-        n.first_city_label
-    ) AS location,
+    lr.location AS location,
 
     'ITA' AS countries,
 
@@ -360,11 +307,13 @@ SELECT
     n.normalized_seniority AS experience_level,
 
     'Full Time' AS jobtype,
-    CAST(n.id AS CHAR) AS partner_job_id,
+    CONCAT(n.id, '-', lr.city_ord) AS partner_job_id,
     n.created_at AS last_build_date,
     n.salary AS salary
 
 FROM normalized n
+INNER JOIN location_rows lr
+    ON lr.job_posting_id = n.id
 
 WHERE
     (
@@ -372,9 +321,9 @@ WHERE
         OR n.product IS NULL
     )
     AND n.priority IN (1, 2, 3, 4, 5)
-    AND n.has_ita = 1
     AND n.employers_id <> 1179402
 
 ORDER BY
     n.priority ASC,
-    n.created_at DESC;
+    n.created_at DESC,
+    lr.city_ord ASC;
