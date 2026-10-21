@@ -24,12 +24,22 @@ Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
 | --- | --- | --- | --- |
 | **LinkedIn** `/wrapping` | — | — | **Rimosso** (endpoint 404; non più in pipeline). SQL legacy in `job_postings_select.sql` non esposto. |
 | **Jooble** `/wrapping/jooble` | solo ITA (`has_ita=1`) | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist employer `1179402`; **una riga per città ITA** (`id`/`partnerJobId` = `job_id-n`); `jooble_job_feed`; pipeline automatica |
-| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella `jooble_job_feed` (description HTML sanitizzata Talent) |
+| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella `jooble_job_feed`; description da colonna precomputata `description_talent` (sanitizer in pipeline, non a request time) |
 | **WhatJobs** `/wrapping/whatjobs` | solo ITA | 1–5 | stessi product/exclude di Jooble; `region` tipo Città, Italy; `whatjobs_job_feed` |
 | **Hirematic** `/wrapping/hirematic` | IT + ES (prima location ITA/ESP) | 1–3 (+ whitelist) | product `one`/`pro`; whitelist employer `2434743`, `829928` (Renfe); CPC null; `hirematic_job_feed` |
 | **Jooble abroad** `/wrapping/jooble/abroad` | non Italia-only | 1–4; P5 solo ESP | combo employer/product/priority con anche job ITA; **una riga per città** (`id`/`partnerJobId` = `job_id-n`); intro EN solo non-Joinrs; `jooble_abroad_job_feed` |
 | **Adzuna** `/wrapping/adzuna` | solo ITA | 1–5 | CPC `1→0.08`, `2→0.07`, `3/4→0.03`, `5→0`; **una riga per città ITA** (`id` = `job_id-n`); `adzuna_job_feed` |
 | **Job Rapido** `/wrapping/jobrapido` | solo ITA | 1–5 | stessi CPC di Adzuna; schema XML ufficiale; una riga per job (prima location); `jobrapido_job_feed` |
+
+**Volume e rischio timeout/OOM** (ordine di grandezza post-explode):
+
+| Endpoint | Righe tipiche | Rischio |
+| --- | ---: | --- |
+| Jooble / Talent | ~49k (explode città) | Alto XML; Talent era critico per sanitizer a request time → ora precomputato |
+| Adzuna | ~49k (explode) | Alto (XML grande) |
+| WhatJobs / Job Rapido | ~42k (1 riga/job) | Medio-alto |
+| Jooble abroad | ~0.8k | Basso |
+| Hirematic | ~1k | Basso |
 
 **Description (feed Italia):** employer Joinrs (`327107`, `829928`, `829944`, `829946`, `829948`, `829951`, `848251`, `2006564`, `4004682`) → solo body, senza intro multi-location. Altri employer → intro + body. Nessun tag sponsorship (`[#LI-REMOTE]`, `[#J-MCITY]`, `[#J-ENTERPRISE]`, `[#J-ONE]`, `[#J-MIN]`, `[#J-INTERNAL]`) nelle description (anche abroad: solo rimozione tag). URL applicative restano `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
 
@@ -77,7 +87,7 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 
 Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Legge da `lw.jooble_job_feed` (annunci Italia). Aggiornata automaticamente da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome via CronJob K8s).
 
-Una riga per città ITA: `partnerJobId` = `{job_posting_id}-{ord}` (es. `12345-1`). L'`apply_url` è il link canonico senza query e senza ordinalità (es. `https://www.joinrs.com/jobs/12345`). Include `<salary>` quando disponibile. Dopo `alembic upgrade head` (fino a `0019`) la PK è `VARCHAR` + colonna `job_posting_id`.
+Una riga per città ITA: `partnerJobId` = `{job_posting_id}-{ord}` (es. `12345-1`). L'`apply_url` è il link canonico senza query e senza ordinalità (es. `https://www.joinrs.com/jobs/12345`). Include `<salary>` quando disponibile. Dopo `alembic upgrade head` (fino a `0021`) la PK è `VARCHAR` + `job_posting_id` + `description_talent` (HTML già normalizzato per Talent, riempito dalla pipeline).
 
 **Test manuale pipeline:**
 

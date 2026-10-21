@@ -305,7 +305,12 @@ def generate_wrapping_xml(
         title = _escape_cdata(job.position if getattr(job, "position", None) else "")
         raw_description = getattr(job, "description", None) or ""
         if description_sanitizer is not None:
-            raw_description = description_sanitizer(raw_description)
+            # Prefer pipeline-precomputed Talent HTML when present (avoids per-request sanitize).
+            precomputed = getattr(job, "description_talent", None)
+            if precomputed is not None and str(precomputed).strip():
+                raw_description = str(precomputed)
+            else:
+                raw_description = description_sanitizer(raw_description)
         description = _escape_cdata(raw_description)
         raw_apply_url = getattr(job, "apply_url", None) or ""
         if apply_url_mode == "jooble":
@@ -370,7 +375,7 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
 
 
 async def get_wrapping_talent(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/talent: Talent.com XML from jooble_job_feed; descriptions sanitized to allowed HTML."""
+    """GET /wrapping/talent: Talent.com XML from jooble_job_feed (description_talent precomputed in pipeline)."""
     rows = get_jooble_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
         rows,

@@ -180,13 +180,24 @@ def sync_feed_table(
         dest_conn.commit()
 
     new_rows: list[dict[str, Any]] = []
+    need_talent_desc = "description_talent" in columns and bool(description_column)
+    talent_normalize = None
+    if need_talent_desc:
+        from api.platforms.talent import normalize_description_for_talent as talent_normalize
+
     for nid in new_ids:
         row = dict(rows_by_id[nid])
         if description_column and enriched:
             job_id = _job_id_from_row(row, id_column)
             if job_id in enriched:
                 row[description_column] = enriched[job_id]
-        new_rows.append({c: row.get(c) for c in columns})
+        payload = {c: row.get(c) for c in columns}
+        if need_talent_desc and talent_normalize is not None:
+            if payload.get("description_talent") is None:
+                payload["description_talent"] = talent_normalize(
+                    payload.get(description_column) if description_column else None
+                )
+        new_rows.append(payload)
 
     inserted = _insert_rows(dest_conn, table, columns, new_rows)
     # Inserts commit per chunk; this commit is a no-op if nothing pending.
@@ -202,3 +213,52 @@ def sync_feed_table(
         unchanged=unchanged,
         total=total,
     )
+
+
+def _sanitize_talent_row(item: tuple[Any, Any]) -> dict[str, Any]:
+    """Picklable helper for parallel Talent description sanitize."""
+    from api.platforms.talent import normalize_description_for_talent
+
+    row_id, description = item
+    return {"id": row_id, "d": normalize_description_for_talent(description)}
+
+
+def backfill_jooble_description_talent(
+    dest_conn: Connection,
+    *,
+    batch_size: int = 1000,
+    workers: int = 4,
+) -> int:
+    """Fill description_talent for existing jooble_job_feed rows (NULL only)."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    updated = 0
+    while True:
+        rows = dest_conn.execute(
+            text(
+                "SELECT id, description FROM jooble_job_feed "
+                "WHERE description_talent IS NULL "
+                "LIMIT :lim"
+            ),
+            {"lim": batch_size},
+        ).fetchall()
+        if not rows:
+            break
+        items = [(r[0], r[1]) for r in rows]
+        if workers <= 1 or len(items) < 50:
+            payload = [_sanitize_talent_row(it) for it in items]
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                payload = list(pool.map(_sanitize_talent_row, items, chunksize=25))
+        dest_conn.execute(
+            text(
+                "UPDATE jooble_job_feed "
+                "SET description_talent = :d "
+                "WHERE id = :id"
+            ),
+            payload,
+        )
+        dest_conn.commit()
+        updated += len(payload)
+        print(f"  description_talent backfill progress: +{len(payload)} total={updated}", flush=True)
+    return updated

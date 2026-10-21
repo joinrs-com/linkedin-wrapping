@@ -162,6 +162,10 @@ class JoobleJobFeed(SQLModel, table=True):
     employers_id: int | None = None
     priority: int | None = None
     description: str | None = Field(default=None, sa_column=Column("description", Text, nullable=True))
+    description_talent: str | None = Field(
+        default=None,
+        sa_column=Column("description_talent", Text, nullable=True),
+    )
     company: str | None = None
     apply_url: str | None = None
     company_id: str | None = None

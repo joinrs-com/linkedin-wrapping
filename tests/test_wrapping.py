@@ -267,7 +267,9 @@ def test_wrapping_talent_empty(client: TestClient):
 
 
 def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
-    """Talent converts Markdown to allowed HTML; Jooble keeps raw description."""
+    """Talent prefers precomputed description_talent; Jooble keeps raw description."""
+    from api.platforms.talent import normalize_description_for_talent
+
     raw = (
         "<p>**Talenti** ricerca:</p>\n"
         "## Requisiti\n"
@@ -275,6 +277,7 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
         "- Propensione\n"
         '<p style="color:red"><b>Note</b></p>'
     )
+    precomputed = normalize_description_for_talent(raw)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
         s.add(
@@ -286,6 +289,7 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
                 employers_id=1,
                 priority=2,
                 description=raw,
+                description_talent=precomputed,
                 company="Joinrs",
                 apply_url="https://www.joinrs.com/jobs/900001",
                 company_id="829928",
@@ -314,6 +318,35 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
 
     # Jooble unchanged (still has markdown markers from DB)
     assert "**Talenti**" in jooble.text
+
+
+def test_wrapping_talent_falls_back_to_runtime_sanitize(client: TestClient):
+    """If description_talent is NULL, Talent still sanitizes description at request time."""
+    raw = "<p>**Hello** world</p>"
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        s.add(
+            models.JoobleJobFeed(
+                id="900002-1",
+                job_posting_id=900002,
+                position="Fallback",
+                employers_name="Acme",
+                employers_id=1,
+                priority=2,
+                description=raw,
+                description_talent=None,
+                company="Joinrs",
+                apply_url="https://www.joinrs.com/jobs/900002",
+                partner_job_id="900002-1",
+                last_build_date=datetime.now(timezone.utc),
+            )
+        )
+        s.commit()
+
+    talent = client.get("/wrapping/talent")
+    assert talent.status_code == 200
+    assert "**" not in talent.text
+    assert "<strong>Hello</strong>" in talent.text
 
 
 def test_wrapping_jooble_abroad_empty(client: TestClient):

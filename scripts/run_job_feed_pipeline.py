@@ -33,6 +33,7 @@ if _env_file.is_file():
 import improve_job_descriptions as ijd  # noqa: E402
 from job_feed_common import (  # noqa: E402
     SyncResult,
+    backfill_jooble_description_talent,
     create_mysql_engine,
     load_sql,
     sync_feed_table,
@@ -64,6 +65,7 @@ FEED_CONFIGS: list[FeedConfig] = [
             "employers_id",
             "priority",
             "description",
+            "description_talent",
             "company",
             "apply_url",
             "company_id",
@@ -346,6 +348,13 @@ def run_pipeline() -> dict:
                 f"  active={result.active} inserted={result.inserted} "
                 f"deleted={result.deleted} unchanged={result.unchanged} total={result.total}"
             )
+            if cfg.name == "jooble":
+                print("=" * 60)
+                print("Backfill jooble description_talent (NULL only)")
+                print("=" * 60)
+                with dest_engine.connect() as dest_conn:
+                    n = backfill_jooble_description_talent(dest_conn)
+                print(f"  description_talent backfilled={n}")
 
         finished_at = _utc_now_naive()
         report = _build_report(
