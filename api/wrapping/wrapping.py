@@ -34,6 +34,12 @@ def _response_from_artifact(session: Session, feed_name: str) -> StreamingRespon
     try:
         artifact = get_feed_xml_artifact(session, feed_name)
     except Exception:
+        # MySQL aborts the transaction on missing-table / other SQL errors;
+        # clear it so the live feed query on the same Session can proceed.
+        try:
+            session.rollback()
+        except Exception:
+            pass
         return None
     if artifact is None or not artifact.payload:
         return None
