@@ -26,8 +26,15 @@ from api.platforms.talent import normalize_description_for_talent
 
 
 def _response_from_artifact(session: Session, feed_name: str) -> StreamingResponse | None:
-    """Serve pre-generated gzip XML if the pipeline artifact exists."""
-    artifact = get_feed_xml_artifact(session, feed_name)
+    """Serve pre-generated gzip XML if the pipeline artifact exists.
+
+    Missing table / DB errors → None so endpoints keep the live fallback
+    (e.g. before alembic 0022 has been applied).
+    """
+    try:
+        artifact = get_feed_xml_artifact(session, feed_name)
+    except Exception:
+        return None
     if artifact is None or not artifact.payload:
         return None
     headers = {
