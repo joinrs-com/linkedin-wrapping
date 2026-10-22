@@ -109,6 +109,39 @@ def test_sync_feed_table_insert_delete_only(sqlite_pair):
     assert list(by_id.keys()) == [1, 5, 6, 11, 12, 13, 14, 15]
     assert by_id[11] == "enriched-11"
     assert by_id[1] == "old-1"
+    assert result.updated == 0
+
+
+def test_sync_refresh_descriptions_normalizes_html(sqlite_pair):
+    """Existing rows get description UPDATE when refresh_descriptions + normalize_html."""
+    src, dest = sqlite_pair
+    select_sql = """
+        SELECT 1 AS id, '<p>**Hello** world</p>' AS description, 't1' AS title
+        UNION ALL SELECT 2, '<p>plain</p>', 't2'
+    """
+    with src.connect() as src_conn, dest.connect() as dest_conn:
+        result = sync_feed_table(
+            dest_conn,
+            src_conn,
+            table="feed",
+            select_sql=select_sql,
+            columns=["id", "description", "title"],
+            id_column="id",
+            description_column="description",
+            normalize_html=True,
+            refresh_descriptions=True,
+        )
+
+    assert result.updated == 2
+    assert result.inserted == 0
+    assert result.deleted == 8  # old ids 3-10 removed; 1-2 kept
+    with dest.connect() as conn:
+        rows = {
+            r[0]: r[1]
+            for r in conn.execute(text("SELECT id, description FROM feed ORDER BY id")).fetchall()
+        }
+    assert "**" not in rows[1]
+    assert "<strong>Hello</strong>" in rows[1]
 
 
 def test_insert_rows_uses_multi_row_insert_per_chunk(sqlite_pair):

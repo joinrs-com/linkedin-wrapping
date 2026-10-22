@@ -267,8 +267,8 @@ def test_wrapping_talent_empty(client: TestClient):
     assert "<lastBuildDate>" in r.text
 
 
-def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
-    """Talent prefers precomputed description_talent; Jooble keeps raw description."""
+def test_wrapping_talent_and_jooble_use_normalized_html(client: TestClient):
+    """Talent uses description_talent; Jooble uses description (pipeline-normalized HTML)."""
     from api.platforms.talent import normalize_description_for_talent
 
     raw = (
@@ -289,7 +289,7 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
                 employers_name="Talenti",
                 employers_id=1,
                 priority=2,
-                description=raw,
+                description=precomputed,
                 description_talent=precomputed,
                 company="Joinrs",
                 apply_url="https://www.joinrs.com/jobs/900001",
@@ -310,15 +310,14 @@ def test_wrapping_talent_sanitizes_markdown_jooble_does_not(client: TestClient):
     assert talent.status_code == 200
     assert jooble.status_code == 200
 
-    assert "**" not in talent.text
-    assert "<strong>Talenti</strong>" in talent.text
-    assert "<strong>Requisiti</strong>" in talent.text
-    assert "<li>Esperienza</li>" in talent.text
-    assert "<strong>Note</strong>" in talent.text
-    assert "style=" not in talent.text
-
-    # Jooble unchanged (still has markdown markers from DB)
-    assert "**Talenti**" in jooble.text
+    for body in (talent.text, jooble.text):
+        assert "**" not in body
+        assert "<strong>Talenti</strong>" in body
+        assert "<strong>Requisiti</strong>" in body
+        assert "<li>Esperienza</li>" in body
+        assert "<strong>Note</strong>" in body
+        assert "style=" not in body
+        assert "Questa posizione" not in body
 
 
 def test_wrapping_talent_falls_back_to_runtime_sanitize(client: TestClient):

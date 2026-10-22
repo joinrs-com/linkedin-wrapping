@@ -1,6 +1,6 @@
 -- Italy + Spain jobs for Jooble/Talent feed (GET /wrapping/jooble, /wrapping/talent).
 -- Output columns match lw.jooble_job_feed (one row per ITA/ESP city; id = job_id-ord).
--- Joinrs employers: body-only description (no intro). Intro IT for ITA, EN for ESP.
+-- Description: body only (no employer intro). HTML normalized in pipeline.
 -- No [#J-…] / [#LI-…] tags.
 
 WITH country_rows AS (
@@ -296,29 +296,7 @@ SELECT
     n.employers_id AS employers_id,
     n.priority AS priority,
 
-    CASE
-        WHEN n.employers_id IN (
-            327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
-        ) THEN CONCAT('<p>', n.description, '</p>')
-        WHEN lr.countries = 'ESP' THEN CONCAT(
-            '<p><strong>This position is at ', n.employer_name, '</strong></p>',
-            '<br><br>',
-            '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
-            '<br><br>',
-            '<p>--</p>',
-            '<p>', n.description, '</p>',
-            '<p>--</p>'
-        )
-        ELSE CONCAT(
-            '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
-            '<br><br>',
-            '<p><em>Il processo di selezione sarà interamente gestito ', n.employer_name, '.</em></p>',
-            '<br><br>',
-            '<p>--</p>',
-            '<p>', n.description, '</p>',
-            '<p>--</p>'
-        )
-    END AS description,
+    CONCAT('<p>', n.description, '</p>') AS description,
 
     'Joinrs' AS company,
 

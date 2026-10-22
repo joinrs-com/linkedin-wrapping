@@ -281,28 +281,7 @@ SELECT
     n.id AS job_posting_id,
     n.position AS title,
 
-    CASE
-        WHEN n.employers_id IN (
-            327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
-        ) THEN CONCAT('<p>', n.description, '</p>')
-        ELSE CONCAT(
-            '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
-            '<br><br>',
-            '<p><em>Il processo di selezione sarà interamente gestito ', n.employer_name, '.</em></p>',
-            '<br><br>',
-            CASE
-                WHEN n.city_count > 1 THEN CONCAT(
-                    '<p><em>Questa opportunità è disponibile in ',
-                    n.city_list,
-                    '.</em></p><br><br>'
-                )
-                ELSE ''
-            END,
-            '<p>--</p>',
-            '<p>', n.description, '</p>',
-            '<p>--</p>'
-        )
-    END AS description,
+    CONCAT('<p>', n.description, '</p>') AS description,
 
     CONCAT(
         'https://www.joinrs.com/jobs/',

@@ -24,7 +24,7 @@ Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
 | --- | --- | --- | --- |
 | **LinkedIn** `/wrapping` | — | — | **Rimosso** (endpoint 404; non più in pipeline). SQL legacy in `job_postings_select.sql` non esposto. |
 | **Jooble** `/wrapping/jooble` | ITA **o** ESP | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist `1179402`; **una riga per città ITA/ESP**; `jooble_job_feed`; XML da `feed_xml_artifact` |
-| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella; `description_talent` precomputata; XML da artefatto gzip |
+| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella; description HTML normalizzata (come Jooble) + artefatto gzip |
 | **WhatJobs** `/wrapping/whatjobs` | solo ITA | 1–5 | stessi product/exclude di Jooble; `region` tipo Città, Italy; `whatjobs_job_feed` |
 | **Hirematic** `/wrapping/hirematic` | IT + ES (prima location ITA/ESP) | 1–3 (+ whitelist) | product `one`/`pro`; whitelist employer `2434743`, `829928` (Renfe); CPC null; `hirematic_job_feed` |
 | **Jooble abroad** `/wrapping/jooble/abroad` | (A) non Italia-only + (B) tutti ESP | A: 1–4 / P5 ESP; B: 1–5 | UNION set enterprise attuale + ESP pieno (NULL product ammesso in B); artefatto gzip |
@@ -42,7 +42,9 @@ Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
 
 La pipeline, dopo il sync delle tabelle, genera XML → gzip → UPSERT in `feed_xml_artifact` (`jooble`, `talent`, `adzuna`, `jooble_abroad`). Gli endpoint streamano il blob con `Content-Encoding: gzip`.
 
-**Description (feed ITA/ESP):** employer Joinrs (`327107`, `829928`, `829944`, `829946`, `829948`, `829951`, `848251`, `2006564`, `4004682`) → solo body. Altri → intro IT (ITA) o EN (ESP/abroad) + body. Nessun tag sponsorship. URL `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
+**Description:** solo body (niente intro employer). Jooble / Talent / Adzuna / Jooble abroad: HTML normalizzato in pipeline (`p`, `br`, `strong`, `em`, `ul`, `li`) e refresh su righe esistenti a ogni sync. Nessun tag sponsorship. URL `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
+
+**Ops dopo deploy (description/intro):** con VPN, una run `python scripts/run_job_feed_pipeline.py` (o sync selettivo jooble/adzuna/abroad) aggiorna le description e rigenera `feed_xml_artifact`. Smoke: `bash scripts/smoke_feed_endpoints.sh`.
 
 ## Setup
 
@@ -183,7 +185,7 @@ Root endpoint with service information.
 
 ## Job feed pipeline (automatica)
 
-`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT solo nuovi, DELETE solo scaduti, mai TRUNCATE). Lo step OpenAI sulle description è **disattivato** (le description restano quelle del SELECT SQL).
+`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT nuovi, DELETE scaduti, mai TRUNCATE). Per Jooble/Adzuna/abroad aggiorna anche le `description` esistenti (body-only + HTML normalize) e rigenera gli artefatti gzip. OpenAI enrichment è **disattivato**.
 
 Sync: `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`, `jooble_abroad_job_feed`.
 

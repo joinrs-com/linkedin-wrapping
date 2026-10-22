@@ -62,6 +62,9 @@ class FeedConfig:
     id_column: str
     description_column: str | None = None
     string_id: bool = False
+    # Talent-style HTML normalize + refresh description on existing rows
+    normalize_html: bool = False
+    refresh_descriptions: bool = False
 
 
 FEED_CONFIGS: list[FeedConfig] = [
@@ -93,6 +96,8 @@ FEED_CONFIGS: list[FeedConfig] = [
         id_column="id",
         description_column="description",
         string_id=True,
+        normalize_html=True,
+        refresh_descriptions=True,
     ),
     FeedConfig(
         name="whatjobs",
@@ -165,6 +170,8 @@ FEED_CONFIGS: list[FeedConfig] = [
         id_column="id",
         description_column="description",
         string_id=True,
+        normalize_html=True,
+        refresh_descriptions=True,
     ),
     FeedConfig(
         name="jobrapido",
@@ -221,8 +228,10 @@ FEED_CONFIGS: list[FeedConfig] = [
             "salary",
         ],
         id_column="id",
-        description_column=None,
+        description_column="description",
         string_id=True,
+        normalize_html=True,
+        refresh_descriptions=True,
     ),
 ]
 
@@ -320,6 +329,7 @@ def _build_report(
                 "inserted": r.inserted,
                 "deleted": r.deleted,
                 "unchanged": r.unchanged,
+                "updated": r.updated,
                 "total": r.total,
             }
             for name, r in feed_results.items()
@@ -416,11 +426,14 @@ def run_pipeline() -> dict:
                     description_column=cfg.description_column,
                     enriched=enriched,
                     string_id=cfg.string_id,
+                    normalize_html=cfg.normalize_html,
+                    refresh_descriptions=cfg.refresh_descriptions,
                 )
             feed_results[cfg.name] = result
             print(
                 f"  active={result.active} inserted={result.inserted} "
-                f"deleted={result.deleted} unchanged={result.unchanged} total={result.total}"
+                f"deleted={result.deleted} unchanged={result.unchanged} "
+                f"updated={result.updated} total={result.total}"
             )
             if cfg.name == "jooble":
                 print("=" * 60)

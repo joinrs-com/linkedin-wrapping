@@ -1,6 +1,6 @@
 -- Jooble abroad: (A) current enterprise abroad rules UNION (B) all ESP with Italy filters.
 -- Output columns match lw.jooble_abroad_job_feed (one row per city; id = job_id-ord).
--- Joinrs employers: body-only description (no intro). Others: English intro, no [#J-…] tags.
+-- Description: body only (no employer intro). HTML normalized in pipeline. No [#J-…] tags.
 -- Synced incrementally by scripts/run_job_feed_pipeline.py (no OpenAI overlay).
 -- Set A: Priority 1–4 any non-Italy-only; Priority 5 Spain only; product pro/one/unlimited; eligible_combinations.
 -- Set B: all ESP cities; product pro/one/unlimited OR NULL; priority 1–5.
@@ -280,20 +280,7 @@ set_a AS (
         n.employer_name AS employers_name,
         n.employers_id AS employers_id,
         n.priority AS priority,
-        CASE
-            WHEN n.employers_id IN (
-                327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
-            ) THEN CONCAT('<p>', n.description, '</p>')
-            ELSE CONCAT(
-                '<p><strong>This position is at ', n.employer_name, '</strong></p>',
-                '<br><br>',
-                '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
-                '<br><br>',
-                '<p>--</p>',
-                '<p>', n.description, '</p>',
-                '<p>--</p>'
-            )
-        END AS description,
+        CONCAT('<p>', n.description, '</p>') AS description,
         'Joinrs' AS company,
         CONCAT('https://www.joinrs.com/jobs/', n.id) AS apply_url,
         '829928' AS company_id,
@@ -333,20 +320,7 @@ set_b AS (
         n.employer_name AS employers_name,
         n.employers_id AS employers_id,
         n.priority AS priority,
-        CASE
-            WHEN n.employers_id IN (
-                327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
-            ) THEN CONCAT('<p>', n.description, '</p>')
-            ELSE CONCAT(
-                '<p><strong>This position is at ', n.employer_name, '</strong></p>',
-                '<br><br>',
-                '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
-                '<br><br>',
-                '<p>--</p>',
-                '<p>', n.description, '</p>',
-                '<p>--</p>'
-            )
-        END AS description,
+        CONCAT('<p>', n.description, '</p>') AS description,
         'Joinrs' AS company,
         CONCAT('https://www.joinrs.com/jobs/', n.id) AS apply_url,
         '829928' AS company_id,

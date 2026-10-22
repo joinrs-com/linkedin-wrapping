@@ -20,6 +20,7 @@ class SyncResult:
     deleted: int
     unchanged: int
     total: int
+    updated: int = 0
 
 
 def mysql_identifier(name: str) -> str:
@@ -137,6 +138,71 @@ def _insert_rows(
     return inserted
 
 
+def _prepare_row_payload(
+    row: dict[str, Any],
+    *,
+    columns: list[str],
+    id_column: str,
+    description_column: str | None,
+    enriched: dict[int, str],
+    normalize_html: bool,
+    talent_normalize,
+) -> dict[str, Any]:
+    """Build insert/update payload; optionally HTML-normalize description (+ talent)."""
+    row = dict(row)
+    if description_column and enriched:
+        job_id = _job_id_from_row(row, id_column)
+        if job_id in enriched:
+            row[description_column] = enriched[job_id]
+    payload = {c: row.get(c) for c in columns}
+    if normalize_html and description_column and talent_normalize is not None:
+        norm = talent_normalize(payload.get(description_column))
+        payload[description_column] = norm
+        if "description_talent" in columns:
+            payload["description_talent"] = norm
+    elif "description_talent" in columns and description_column and talent_normalize is not None:
+        if payload.get("description_talent") is None:
+            payload["description_talent"] = talent_normalize(payload.get(description_column))
+    return payload
+
+
+def _update_description_rows(
+    conn: Connection,
+    table: str,
+    id_column: str,
+    description_column: str,
+    rows: list[dict[str, Any]],
+    *,
+    also_talent: bool = False,
+    chunk_size: int = 100,
+) -> int:
+    """UPDATE description (+ optional description_talent) for existing feed rows."""
+    if not rows:
+        return 0
+    updated = 0
+    for chunk in _chunked(rows, chunk_size):
+        if also_talent:
+            stmt = text(
+                f"UPDATE {table} SET {description_column} = :d, description_talent = :dt "
+                f"WHERE {id_column} = :id"
+            )
+            payload = [
+                {"id": r["id"], "d": r[description_column], "dt": r.get("description_talent")}
+                for r in chunk
+            ]
+        else:
+            stmt = text(
+                f"UPDATE {table} SET {description_column} = :d WHERE {id_column} = :id"
+            )
+            payload = [{"id": r["id"], "d": r[description_column]} for r in chunk]
+        conn.execute(stmt, payload)
+        conn.commit()
+        updated += len(chunk)
+        if updated % 5000 == 0 or updated == len(rows):
+            print(f"  description refresh progress: {updated}/{len(rows)}", flush=True)
+    return updated
+
+
 def sync_feed_table(
     dest_conn: Connection,
     source_conn: Connection,
@@ -148,10 +214,13 @@ def sync_feed_table(
     description_column: str | None = None,
     enriched: dict[int, str] | None = None,
     string_id: bool = False,
+    normalize_html: bool = False,
+    refresh_descriptions: bool = False,
 ) -> SyncResult:
     """
-    Incremental sync: DELETE expired + INSERT new only.
-    Unchanged rows are left untouched (no UPDATE).
+    Incremental sync: DELETE expired + INSERT new.
+    When refresh_descriptions=True (and description_column set), also UPDATE
+    description for existing active ids (used after intro/HTML changes).
     """
     enriched = enriched or {}
 
@@ -175,35 +244,63 @@ def sync_feed_table(
 
     expired_ids = sorted(existing_ids - active_ids)
     new_ids = sorted(active_ids - existing_ids)
-    unchanged = len(existing_ids & active_ids)
+    keep_ids = sorted(existing_ids & active_ids)
+    unchanged = len(keep_ids)
 
     deleted = _delete_ids(dest_conn, table, id_column, expired_ids)
     if deleted:
         dest_conn.commit()
 
-    new_rows: list[dict[str, Any]] = []
     need_talent_desc = "description_talent" in columns and bool(description_column)
     talent_normalize = None
-    if need_talent_desc:
+    if normalize_html or need_talent_desc:
         from api.platforms.talent import normalize_description_for_talent as talent_normalize
 
+    new_rows: list[dict[str, Any]] = []
     for nid in new_ids:
-        row = dict(rows_by_id[nid])
-        if description_column and enriched:
-            job_id = _job_id_from_row(row, id_column)
-            if job_id in enriched:
-                row[description_column] = enriched[job_id]
-        payload = {c: row.get(c) for c in columns}
-        if need_talent_desc and talent_normalize is not None:
-            if payload.get("description_talent") is None:
-                payload["description_talent"] = talent_normalize(
-                    payload.get(description_column) if description_column else None
-                )
+        payload = _prepare_row_payload(
+            rows_by_id[nid],
+            columns=columns,
+            id_column=id_column,
+            description_column=description_column,
+            enriched=enriched,
+            normalize_html=normalize_html,
+            talent_normalize=talent_normalize,
+        )
         new_rows.append(payload)
 
     inserted = _insert_rows(dest_conn, table, columns, new_rows)
     # Inserts commit per chunk; this commit is a no-op if nothing pending.
     dest_conn.commit()
+
+    updated = 0
+    if refresh_descriptions and description_column and keep_ids:
+        refresh_rows: list[dict[str, Any]] = []
+        for nid in keep_ids:
+            payload = _prepare_row_payload(
+                rows_by_id[nid],
+                columns=columns,
+                id_column=id_column,
+                description_column=description_column,
+                enriched=enriched,
+                normalize_html=normalize_html,
+                talent_normalize=talent_normalize,
+            )
+            refresh_rows.append(
+                {
+                    "id": nid,
+                    description_column: payload.get(description_column),
+                    "description_talent": payload.get("description_talent"),
+                }
+            )
+        updated = _update_description_rows(
+            dest_conn,
+            table,
+            id_column,
+            description_column,
+            refresh_rows,
+            also_talent=need_talent_desc,
+        )
 
     total_row = dest_conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
     total = int(total_row or 0)
@@ -214,6 +311,7 @@ def sync_feed_table(
         deleted=deleted,
         unchanged=unchanged,
         total=total,
+        updated=updated,
     )
 
 
