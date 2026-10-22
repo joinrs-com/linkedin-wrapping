@@ -4,12 +4,12 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 ## Features
 
-- GET `/wrapping/jooble` – XML Jooble da `jooble_job_feed` (annunci Italia, pipeline automatica)
-- GET `/wrapping/talent` – stesso XML di Jooble, description HTML sanitizzata per Talent.com
-- GET `/wrapping/jooble/abroad` – XML Jooble per annunci enterprise all'estero (`jooble_abroad_job_feed`, pipeline automatica, senza OpenAI)
+- GET `/wrapping/jooble` – XML Jooble da artefatto gzip (fallback live da `jooble_job_feed`; ITA+ESP)
+- GET `/wrapping/talent` – come Jooble, description Talent precomputata; artefatto gzip
+- GET `/wrapping/jooble/abroad` – XML Jooble abroad (set enterprise + tutti ESP); artefatto gzip
 - GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia)
 - GET `/wrapping/hirematic` – XML Appcast Hirematic da `hirematic_job_feed`
-- GET `/wrapping/adzuna` – XML Adzuna da `adzuna_job_feed` (Italia, CPC da priority)
+- GET `/wrapping/adzuna` – XML Adzuna da artefatto gzip (ITA+ESP, CPC da priority)
 - GET `/wrapping/jobrapido` – XML Job Rapido da `jobrapido_job_feed` (schema ufficiale, una riga per job come Adzuna, CPC da priority)
 - Database migrations using Alembic with `lw` schema
 - Helm chart for Kubernetes deployment
@@ -23,25 +23,26 @@ Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
 | XML | Country | Priority | Note |
 | --- | --- | --- | --- |
 | **LinkedIn** `/wrapping` | — | — | **Rimosso** (endpoint 404; non più in pipeline). SQL legacy in `job_postings_select.sql` non esposto. |
-| **Jooble** `/wrapping/jooble` | solo ITA (`has_ita=1`) | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist employer `1179402`; **una riga per città ITA** (`id`/`partnerJobId` = `job_id-n`); `jooble_job_feed`; pipeline automatica |
-| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella `jooble_job_feed`; description da colonna precomputata `description_talent` (sanitizer in pipeline, non a request time) |
+| **Jooble** `/wrapping/jooble` | ITA **o** ESP | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist `1179402`; **una riga per città ITA/ESP**; `jooble_job_feed`; XML da `feed_xml_artifact` |
+| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella; `description_talent` precomputata; XML da artefatto gzip |
 | **WhatJobs** `/wrapping/whatjobs` | solo ITA | 1–5 | stessi product/exclude di Jooble; `region` tipo Città, Italy; `whatjobs_job_feed` |
 | **Hirematic** `/wrapping/hirematic` | IT + ES (prima location ITA/ESP) | 1–3 (+ whitelist) | product `one`/`pro`; whitelist employer `2434743`, `829928` (Renfe); CPC null; `hirematic_job_feed` |
-| **Jooble abroad** `/wrapping/jooble/abroad` | non Italia-only | 1–4; P5 solo ESP | combo employer/product/priority con anche job ITA; **una riga per città** (`id`/`partnerJobId` = `job_id-n`); intro EN solo non-Joinrs; `jooble_abroad_job_feed` |
-| **Adzuna** `/wrapping/adzuna` | solo ITA | 1–5 | CPC `1→0.08`, `2→0.07`, `3/4→0.03`, `5→0`; **una riga per città ITA** (`id` = `job_id-n`); `adzuna_job_feed` |
+| **Jooble abroad** `/wrapping/jooble/abroad` | (A) non Italia-only + (B) tutti ESP | A: 1–4 / P5 ESP; B: 1–5 | UNION set enterprise attuale + ESP pieno (NULL product ammesso in B); artefatto gzip |
+| **Adzuna** `/wrapping/adzuna` | ITA **o** ESP | 1–5 | CPC invariato; **una riga per città**; country `IT`/`ES`; artefatto gzip |
 | **Job Rapido** `/wrapping/jobrapido` | solo ITA | 1–5 | stessi CPC di Adzuna; schema XML ufficiale; una riga per job (prima location); `jobrapido_job_feed` |
 
-**Volume e rischio timeout/OOM** (ordine di grandezza post-explode):
+**Volume** (ordine di grandezza post ITA+ESP + artefatti):
 
-| Endpoint | Righe tipiche | Rischio |
+| Endpoint | Righe tipiche | Serving |
 | --- | ---: | --- |
-| Jooble / Talent | ~49k (explode città) | Alto XML; Talent era critico per sanitizer a request time → ora precomputato |
-| Adzuna | ~49k (explode) | Alto (XML grande) |
-| WhatJobs / Job Rapido | ~42k (1 riga/job) | Medio-alto |
-| Jooble abroad | ~0.8k | Basso |
-| Hirematic | ~1k | Basso |
+| Jooble / Talent / Adzuna | ~78–80k | gzip da `lw.feed_xml_artifact` (pipeline); fallback live se assente |
+| Jooble abroad | ~30k | idem |
+| WhatJobs / Job Rapido | ~42k | live (senza artefatto) |
+| Hirematic | ~1k | live |
 
-**Description (feed Italia):** employer Joinrs (`327107`, `829928`, `829944`, `829946`, `829948`, `829951`, `848251`, `2006564`, `4004682`) → solo body, senza intro multi-location. Altri employer → intro + body. Nessun tag sponsorship (`[#LI-REMOTE]`, `[#J-MCITY]`, `[#J-ENTERPRISE]`, `[#J-ONE]`, `[#J-MIN]`, `[#J-INTERNAL]`) nelle description (anche abroad: solo rimozione tag). URL applicative restano `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
+La pipeline, dopo il sync delle tabelle, genera XML → gzip → UPSERT in `feed_xml_artifact` (`jooble`, `talent`, `adzuna`, `jooble_abroad`). Gli endpoint streamano il blob con `Content-Encoding: gzip`.
+
+**Description (feed ITA/ESP):** employer Joinrs (`327107`, `829928`, `829944`, `829946`, `829948`, `829951`, `848251`, `2006564`, `4004682`) → solo body. Altri → intro IT (ITA) o EN (ESP/abroad) + body. Nessun tag sponsorship. URL `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
 
 ## Setup
 
@@ -85,9 +86,9 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 
 ### GET /wrapping/jooble
 
-Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Legge da `lw.jooble_job_feed` (annunci Italia). Aggiornata automaticamente da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome via CronJob K8s).
+Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Contenuto ITA+ESP da `lw.jooble_job_feed`; in produzione l’XML gzip arriva da `lw.feed_xml_artifact`. Aggiornata da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome).
 
-Una riga per città ITA: `partnerJobId` = `{job_posting_id}-{ord}` (es. `12345-1`). L'`apply_url` è il link canonico senza query e senza ordinalità (es. `https://www.joinrs.com/jobs/12345`). Include `<salary>` quando disponibile. Dopo `alembic upgrade head` (fino a `0021`) la PK è `VARCHAR` + `job_posting_id` + `description_talent` (HTML già normalizzato per Talent, riempito dalla pipeline).
+Una riga per città ITA/ESP: `partnerJobId` = `{job_posting_id}-{ord}`. `apply_url` canonico senza query. Dopo `alembic upgrade head` (fino a `0022`) anche tabella `feed_xml_artifact`.
 
 **Test manuale pipeline:**
 
@@ -118,11 +119,7 @@ python scripts/run_job_feed_pipeline.py
 
 ### GET /wrapping/jooble/abroad
 
-Feed Jooble **separato** per annunci enterprise con location non solo in Italia. Legge da `lw.jooble_abroad_job_feed`, aggiornata dalla pipeline automatica (stesso CronJob di Jooble/Adzuna).
-
-Priority **1–4** per qualsiasi location non Italia-only; priority **5** solo se c’è una location in Spagna (`ESP`). Una riga per città: `partnerJobId` = `{job_posting_id}-{ord}`; URL applicativa senza `-n`. Intro in inglese solo per employer non-Joinrs; Joinrs = solo body. Stesso schema XML di `/wrapping/jooble`, con in più `<priority>`, `<employers_id>` e `<countries>`. Description pre-formattata in SQL (no OpenAI).
-
-Dopo `alembic upgrade head` (fino a `0020`) la PK è `VARCHAR` + `job_posting_id`.
+Feed Jooble **abroad**: unione di (A) regole enterprise non Italia-only (product pro/one/unlimited, combo con ITA) e (B) **tutti** gli annunci ESP con filtri Italia (NULL product ammesso → Adecco Spain). XML da artefatto gzip. Intro EN per non-Joinrs; tag `<countries>` incluso.
 
 ### GET /wrapping/whatjobs
 

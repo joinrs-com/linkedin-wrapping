@@ -34,10 +34,10 @@ jobFeedPipeline:
   resources:
     limits:
       cpu: "1"
-      memory: 2Gi
+      memory: 4Gi
     requests:
       cpu: 100m
-      memory: 512Mi
+      memory: 1Gi
 
 
 ingress:

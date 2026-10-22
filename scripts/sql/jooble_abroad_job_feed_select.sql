@@ -1,8 +1,9 @@
--- Enterprise jobs abroad for Jooble sponsorship feed.
+-- Jooble abroad: (A) current enterprise abroad rules UNION (B) all ESP with Italy filters.
 -- Output columns match lw.jooble_abroad_job_feed (one row per city; id = job_id-ord).
 -- Joinrs employers: body-only description (no intro). Others: English intro, no [#J-…] tags.
 -- Synced incrementally by scripts/run_job_feed_pipeline.py (no OpenAI overlay).
--- Priority 1–4: any non-Italy-only location. Priority 5: Spain (ESP) only.
+-- Set A: Priority 1–4 any non-Italy-only; Priority 5 Spain only; product pro/one/unlimited; eligible_combinations.
+-- Set B: all ESP cities; product pro/one/unlimited OR NULL; priority 1–5.
 
 WITH country_rows AS (
     SELECT
@@ -83,6 +84,15 @@ city_list_agg AS (
     GROUP BY ac.job_posting_id
 ),
 
+esp_city_list_agg AS (
+    SELECT
+        ac.job_posting_id,
+        COUNT(*) AS city_count
+    FROM all_cities ac
+    WHERE ac.country_code = 'ESP'
+    GROUP BY ac.job_posting_id
+),
+
 location_rows AS (
     SELECT
         ac.job_posting_id,
@@ -93,7 +103,6 @@ location_rows AS (
 
     UNION ALL
 
-    -- Jobs with country codes but no city labels: one fallback row
     SELECT
         ca.job_posting_id,
         1 AS city_ord,
@@ -104,6 +113,29 @@ location_rows AS (
         ON cla.job_posting_id = ca.job_posting_id
     WHERE COALESCE(cla.city_count, 0) = 0
       AND NULLIF(TRIM(ca.countries), '') IS NOT NULL
+),
+
+esp_location_rows AS (
+    SELECT
+        ac.job_posting_id,
+        ac.city_ord,
+        ac.city_name AS location,
+        'ESP' AS countries
+    FROM all_cities ac
+    WHERE ac.country_code = 'ESP'
+
+    UNION ALL
+
+    SELECT
+        ca.job_posting_id,
+        100001 AS city_ord,
+        'Spain' AS location,
+        'ESP' AS countries
+    FROM country_agg ca
+    LEFT JOIN esp_city_list_agg ecla
+        ON ecla.job_posting_id = ca.job_posting_id
+    WHERE ca.has_esp = 1
+      AND COALESCE(ecla.city_count, 0) = 0
 ),
 
 salary_extracted AS (
@@ -238,73 +270,116 @@ eligible_combinations AS (
         priority
     FROM normalized
     WHERE has_ita = 1
+),
+
+set_a AS (
+    SELECT
+        CONCAT(n.id, '-', lr.city_ord) AS id,
+        n.id AS job_posting_id,
+        n.position AS position,
+        n.employer_name AS employers_name,
+        n.employers_id AS employers_id,
+        n.priority AS priority,
+        CASE
+            WHEN n.employers_id IN (
+                327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
+            ) THEN CONCAT('<p>', n.description, '</p>')
+            ELSE CONCAT(
+                '<p><strong>This position is at ', n.employer_name, '</strong></p>',
+                '<br><br>',
+                '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
+                '<br><br>',
+                '<p>--</p>',
+                '<p>', n.description, '</p>',
+                '<p>--</p>'
+            )
+        END AS description,
+        'Joinrs' AS company,
+        CONCAT('https://www.joinrs.com/jobs/', n.id) AS apply_url,
+        '829928' AS company_id,
+        lr.location AS location,
+        COALESCE(NULLIF(TRIM(lr.countries), ''), n.countries) AS countries,
+        n.normalized_workplace_type AS workplace_types,
+        n.normalized_seniority AS experience_level,
+        'Full Time' AS jobtype,
+        CONCAT(n.id, '-', lr.city_ord) AS partner_job_id,
+        n.created_at AS last_build_date,
+        n.salary AS salary
+    FROM normalized n
+    INNER JOIN location_rows lr
+        ON lr.job_posting_id = n.id
+    JOIN eligible_combinations ec
+        ON ec.employers_id = n.employers_id
+       AND ec.product = n.product
+       AND ec.priority = n.priority
+    WHERE
+        n.product IN ('pro', 'one', 'pro_unlimited')
+        AND (
+            n.priority IN (1, 2, 3, 4)
+            OR (n.priority = 5 AND n.has_esp = 1)
+        )
+        AND NOT (
+            n.has_ita = 1
+            AND n.country_count = 1
+        )
+        AND n.employers_id <> 1179402
+),
+
+set_b AS (
+    SELECT
+        CONCAT(n.id, '-', lr.city_ord) AS id,
+        n.id AS job_posting_id,
+        n.position AS position,
+        n.employer_name AS employers_name,
+        n.employers_id AS employers_id,
+        n.priority AS priority,
+        CASE
+            WHEN n.employers_id IN (
+                327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
+            ) THEN CONCAT('<p>', n.description, '</p>')
+            ELSE CONCAT(
+                '<p><strong>This position is at ', n.employer_name, '</strong></p>',
+                '<br><br>',
+                '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
+                '<br><br>',
+                '<p>--</p>',
+                '<p>', n.description, '</p>',
+                '<p>--</p>'
+            )
+        END AS description,
+        'Joinrs' AS company,
+        CONCAT('https://www.joinrs.com/jobs/', n.id) AS apply_url,
+        '829928' AS company_id,
+        lr.location AS location,
+        lr.countries AS countries,
+        n.normalized_workplace_type AS workplace_types,
+        n.normalized_seniority AS experience_level,
+        'Full Time' AS jobtype,
+        CONCAT(n.id, '-', lr.city_ord) AS partner_job_id,
+        n.created_at AS last_build_date,
+        n.salary AS salary
+    FROM normalized n
+    INNER JOIN esp_location_rows lr
+        ON lr.job_posting_id = n.id
+    WHERE
+        n.has_esp = 1
+        AND (
+            n.product IN ('pro', 'one', 'pro_unlimited')
+            OR n.product IS NULL
+        )
+        AND n.priority IN (1, 2, 3, 4, 5)
+        AND n.employers_id <> 1179402
+),
+
+combined AS (
+    SELECT * FROM set_a
+    UNION
+    SELECT * FROM set_b
 )
 
-SELECT
-    CONCAT(n.id, '-', lr.city_ord) AS id,
-    n.id AS job_posting_id,
-    n.position AS position,
-    n.employer_name AS employers_name,
-    n.employers_id AS employers_id,
-    n.priority AS priority,
-
-    CASE
-        WHEN n.employers_id IN (
-            327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
-        ) THEN CONCAT('<p>', n.description, '</p>')
-        ELSE CONCAT(
-            '<p><strong>This position is at ', n.employer_name, '</strong></p>',
-            '<br><br>',
-            '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
-            '<br><br>',
-            '<p>--</p>',
-            '<p>', n.description, '</p>',
-            '<p>--</p>'
-        )
-    END AS description,
-
-    'Joinrs' AS company,
-
-    CONCAT(
-        'https://www.joinrs.com/jobs/',
-        n.id
-    ) AS apply_url,
-
-    '829928' AS company_id,
-
-    lr.location AS location,
-
-    COALESCE(NULLIF(TRIM(lr.countries), ''), n.countries) AS countries,
-    n.normalized_workplace_type AS workplace_types,
-    n.normalized_seniority AS experience_level,
-
-    'Full Time' AS jobtype,
-    CONCAT(n.id, '-', lr.city_ord) AS partner_job_id,
-    n.created_at AS last_build_date,
-    n.salary AS salary
-
-FROM normalized n
-INNER JOIN location_rows lr
-    ON lr.job_posting_id = n.id
-
-JOIN eligible_combinations ec
-    ON ec.employers_id = n.employers_id
-   AND ec.product = n.product
-   AND ec.priority = n.priority
-
-WHERE
-    n.product IN ('pro', 'one', 'pro_unlimited')
-    AND (
-        n.priority IN (1, 2, 3, 4)
-        OR (n.priority = 5 AND n.has_esp = 1)
-    )
-    AND NOT (
-        n.has_ita = 1
-        AND n.country_count = 1
-    )
-    AND n.employers_id <> 1179402
-
+SELECT *
+FROM combined
 ORDER BY
-    n.priority ASC,
-    n.created_at DESC,
-    lr.city_ord ASC;
+    priority ASC,
+    last_build_date DESC,
+    id ASC;

@@ -37,8 +37,20 @@ from job_feed_common import (  # noqa: E402
     create_mysql_engine,
     load_sql,
     sync_feed_table,
+    upsert_feed_xml_artifact,
 )
-from api.wrapping.models import JobFeedPipelineRun  # noqa: E402
+from api.platforms.talent import normalize_description_for_talent  # noqa: E402
+from api.wrapping.models import (  # noqa: E402
+    AdzunaJobFeed,
+    JobFeedPipelineRun,
+    JoobleAbroadJobFeed,
+    JoobleJobFeed,
+)
+from api.wrapping.wrapping import (  # noqa: E402
+    generate_adzuna_xml,
+    generate_wrapping_xml,
+)
+from sqlmodel import select  # noqa: E402
 
 
 @dataclass
@@ -219,6 +231,68 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _generate_feed_xml_artifacts(dest_engine) -> dict[str, dict]:
+    """Build gzip XML for jooble/talent/adzuna/jooble_abroad and upsert artifacts."""
+    stats: dict[str, dict] = {}
+    with Session(dest_engine) as session:
+        jooble_rows = list(session.exec(select(JoobleJobFeed)).all())
+        abroad_rows = list(session.exec(select(JoobleAbroadJobFeed)).all())
+        adzuna_rows = list(session.exec(select(AdzunaJobFeed)).all())
+
+    builds = [
+        (
+            "jooble",
+            generate_wrapping_xml(
+                jooble_rows,
+                apply_url_mode="jooble",
+                prefer_employers_name_as_company=True,
+                include_priority=True,
+                include_employers_id=True,
+            ),
+            len(jooble_rows),
+        ),
+        (
+            "talent",
+            generate_wrapping_xml(
+                jooble_rows,
+                apply_url_mode="jooble",
+                prefer_employers_name_as_company=True,
+                include_priority=True,
+                include_employers_id=True,
+                description_sanitizer=normalize_description_for_talent,
+            ),
+            len(jooble_rows),
+        ),
+        (
+            "adzuna",
+            generate_adzuna_xml(adzuna_rows),
+            len(adzuna_rows),
+        ),
+        (
+            "jooble_abroad",
+            generate_wrapping_xml(
+                abroad_rows,
+                apply_url_mode="jooble",
+                prefer_employers_name_as_company=True,
+                include_priority=True,
+                include_employers_id=True,
+                include_countries=True,
+            ),
+            len(abroad_rows),
+        ),
+    ]
+
+    with dest_engine.connect() as dest_conn:
+        for feed_name, xml_text, job_count in builds:
+            stats[feed_name] = upsert_feed_xml_artifact(
+                dest_conn,
+                feed_name=feed_name,
+                xml_text=xml_text,
+                job_count=job_count,
+            )
+    return stats
+
+
 def _build_report(
     *,
     started_at: datetime,
@@ -356,6 +430,16 @@ def run_pipeline() -> dict:
                     n = backfill_jooble_description_talent(dest_conn)
                 print(f"  description_talent backfilled={n}")
 
+        print("=" * 60)
+        print("Generate feed XML artifacts (gzip)")
+        print("=" * 60)
+        artifact_stats = _generate_feed_xml_artifacts(dest_engine)
+        for name, stats in artifact_stats.items():
+            print(
+                f"  {name}: jobs={stats['job_count']} "
+                f"raw={stats['bytes_uncompressed']} gzip={stats['bytes_gzip']}"
+            )
+
         finished_at = _utc_now_naive()
         report = _build_report(
             started_at=started_at,
@@ -364,6 +448,7 @@ def run_pipeline() -> dict:
             enrichment=enrichment,
             feed_results=feed_results,
         )
+        report["artifacts"] = artifact_stats
         _save_run_report(dest_engine, report, enrichment, feed_results)
         print("\n" + json.dumps(report, indent=2, ensure_ascii=False))
         return report

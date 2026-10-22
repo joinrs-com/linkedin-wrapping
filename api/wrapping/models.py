@@ -4,7 +4,7 @@ import os
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Column, Date, Numeric, String, Text
+from sqlalchemy import BigInteger, Column, Date, DateTime, Integer, LargeBinary, Numeric, String, Text
 from sqlalchemy.engine.url import make_url
 from sqlmodel import SQLModel, Field
 
@@ -249,6 +249,26 @@ class AdzunaJobFeed(SQLModel, table=True):
     posted_date: date | None = Field(default=None, sa_column=Column("date", Date, nullable=True))
     cpc: float | None = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
     priority: int | None = None
+
+
+class FeedXmlArtifact(SQLModel, table=True):
+    """Maps `lw.feed_xml_artifact`; gzip XML pre-built by the job-feed pipeline."""
+
+    __tablename__ = "feed_xml_artifact"
+    __table_args__ = _resolve_schema()
+
+    feed_name: str = Field(primary_key=True, max_length=64)
+    payload: bytes = Field(sa_column=Column("payload", LargeBinary, nullable=False))
+    content_type: str = Field(
+        default="application/xml",
+        sa_column=Column("content_type", String(64), nullable=False),
+    )
+    job_count: int = Field(default=0, sa_column=Column("job_count", Integer, nullable=False))
+    bytes_uncompressed: int = Field(
+        default=0,
+        sa_column=Column("bytes_uncompressed", BigInteger, nullable=False),
+    )
+    generated_at: datetime = Field(sa_column=Column("generated_at", DateTime, nullable=False))
 
 
 class JobrapidoJobFeed(SQLModel, table=True):

@@ -4,6 +4,7 @@ from typing import List
 
 from api.wrapping.models import (
     AdzunaJobFeed,
+    FeedXmlArtifact,
     HirematicJobFeed,
     JobPostings,
     JobrapidoJobFeed,
@@ -72,3 +73,8 @@ def get_jobrapido_job_feed_rows(session: Session) -> List[JobrapidoJobFeed]:
     )
     results = session.exec(statement)
     return list(results.all())
+
+
+def get_feed_xml_artifact(session: Session, feed_name: str) -> FeedXmlArtifact | None:
+    """Pre-generated gzip XML artifact for a feed, if the pipeline has built one."""
+    return session.get(FeedXmlArtifact, feed_name)

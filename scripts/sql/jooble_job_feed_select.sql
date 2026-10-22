@@ -1,6 +1,7 @@
--- Italy jobs for Jooble/Talent feed (GET /wrapping/jooble, /wrapping/talent).
--- Output columns match lw.jooble_job_feed (one row per Italian city; id = job_id-ord).
--- Joinrs employers: body-only description (no intro). No [#J-…] / [#LI-…] tags.
+-- Italy + Spain jobs for Jooble/Talent feed (GET /wrapping/jooble, /wrapping/talent).
+-- Output columns match lw.jooble_job_feed (one row per ITA/ESP city; id = job_id-ord).
+-- Joinrs employers: body-only description (no intro). Intro IT for ITA, EN for ESP.
+-- No [#J-…] / [#LI-…] tags.
 
 WITH country_rows AS (
     SELECT
@@ -39,16 +40,18 @@ WITH country_rows AS (
 country_agg AS (
     SELECT
         cr.job_posting_id,
-        MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita
+        MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita,
+        MAX(CASE WHEN cr.country_code = 'ESP' THEN 1 ELSE 0 END) AS has_esp
     FROM country_rows cr
     GROUP BY cr.job_posting_id
 ),
 
-ita_cities AS (
+feed_cities AS (
     SELECT
         jp.id AS job_posting_id,
         jt.ord AS city_ord,
-        TRIM(SUBSTRING_INDEX(jt.city_label, ' - ', 1)) AS city_name
+        TRIM(SUBSTRING_INDEX(jt.city_label, ' - ', 1)) AS city_name,
+        jt.country_code
     FROM job_postings.job_postings_1 jp
     INNER JOIN JSON_TABLE(
         CASE
@@ -62,35 +65,53 @@ ita_cities AS (
             country_code VARCHAR(10) PATH '$.country_code'
         )
     ) jt ON TRUE
-    WHERE jt.country_code = 'ITA'
+    WHERE jt.country_code IN ('ITA', 'ESP')
       AND NULLIF(TRIM(jt.city_label), '') IS NOT NULL
 ),
 
 city_list_agg AS (
     SELECT
-        ic.job_posting_id,
+        fc.job_posting_id,
+        fc.country_code,
         COUNT(*) AS city_count
-    FROM ita_cities ic
-    GROUP BY ic.job_posting_id
+    FROM feed_cities fc
+    GROUP BY fc.job_posting_id, fc.country_code
 ),
 
 location_rows AS (
     SELECT
-        ic.job_posting_id,
-        ic.city_ord,
-        ic.city_name AS location
-    FROM ita_cities ic
+        fc.job_posting_id,
+        fc.city_ord,
+        fc.city_name AS location,
+        fc.country_code AS countries
+    FROM feed_cities fc
 
     UNION ALL
 
     SELECT
         ca.job_posting_id,
         1 AS city_ord,
-        'Italy' AS location
+        'Italy' AS location,
+        'ITA' AS countries
     FROM country_agg ca
     LEFT JOIN city_list_agg cla
         ON cla.job_posting_id = ca.job_posting_id
+       AND cla.country_code = 'ITA'
     WHERE ca.has_ita = 1
+      AND COALESCE(cla.city_count, 0) = 0
+
+    UNION ALL
+
+    SELECT
+        ca.job_posting_id,
+        100001 AS city_ord,
+        'Spain' AS location,
+        'ESP' AS countries
+    FROM country_agg ca
+    LEFT JOIN city_list_agg cla
+        ON cla.job_posting_id = ca.job_posting_id
+       AND cla.country_code = 'ESP'
+    WHERE ca.has_esp = 1
       AND COALESCE(cla.city_count, 0) = 0
 ),
 
@@ -232,7 +253,7 @@ prepared AS (
         ON sf.job_posting_id = jp.id
     INNER JOIN country_agg ca
         ON ca.job_posting_id = jp.id
-        AND ca.has_ita = 1
+        AND (ca.has_ita = 1 OR ca.has_esp = 1)
 ),
 
 extracted AS (
@@ -279,6 +300,15 @@ SELECT
         WHEN n.employers_id IN (
             327107, 829928, 829944, 829946, 829948, 829951, 848251, 2006564, 4004682
         ) THEN CONCAT('<p>', n.description, '</p>')
+        WHEN lr.countries = 'ESP' THEN CONCAT(
+            '<p><strong>This position is at ', n.employer_name, '</strong></p>',
+            '<br><br>',
+            '<p><em>The selection process will be entirely managed by ', n.employer_name, '.</em></p>',
+            '<br><br>',
+            '<p>--</p>',
+            '<p>', n.description, '</p>',
+            '<p>--</p>'
+        )
         ELSE CONCAT(
             '<p><strong>Questa posizione è in ', n.employer_name, '</strong></p>',
             '<br><br>',
@@ -301,7 +331,7 @@ SELECT
 
     lr.location AS location,
 
-    'ITA' AS countries,
+    lr.countries AS countries,
 
     COALESCE(n.all_workmodes, '') AS workplace_types,
     n.normalized_seniority AS experience_level,

@@ -1,15 +1,18 @@
 import html
 import re
 from fastapi import Depends, Response
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 from datetime import datetime, timezone
 from email.utils import format_datetime
+from io import BytesIO
 
 from typing import Callable
 
 from utils.database import get_session
 from api.wrapping.service import (
     get_adzuna_job_feed_rows,
+    get_feed_xml_artifact,
     get_hirematic_job_feed_rows,
     get_jobrapido_job_feed_rows,
     get_jooble_abroad_job_feed_rows,
@@ -20,6 +23,24 @@ from api.platforms.base import (
     rewrite_apply_url_for_jooble_feed,
 )
 from api.platforms.talent import normalize_description_for_talent
+
+
+def _response_from_artifact(session: Session, feed_name: str) -> StreamingResponse | None:
+    """Serve pre-generated gzip XML if the pipeline artifact exists."""
+    artifact = get_feed_xml_artifact(session, feed_name)
+    if artifact is None or not artifact.payload:
+        return None
+    headers = {
+        "Content-Encoding": "gzip",
+        "Content-Type": "application/xml; charset=utf-8",
+        "X-Feed-Job-Count": str(artifact.job_count),
+        "X-Feed-Generated-At": artifact.generated_at.isoformat() if artifact.generated_at else "",
+    }
+    return StreamingResponse(
+        BytesIO(artifact.payload),
+        media_type="application/xml; charset=utf-8",
+        headers=headers,
+    )
 
 
 def _format_rfc1123_gmt(dt: datetime | None = None) -> str:
@@ -359,7 +380,10 @@ def generate_wrapping_xml(
 
 
 async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble: XML from jooble_job_feed; apply_url is the canonical job link without query params."""
+    """GET /wrapping/jooble: XML from artifact or live jooble_job_feed."""
+    cached = _response_from_artifact(session, "jooble")
+    if cached is not None:
+        return cached
     rows = get_jooble_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
         rows,
@@ -375,7 +399,10 @@ async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Respon
 
 
 async def get_wrapping_talent(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/talent: Talent.com XML from jooble_job_feed (description_talent precomputed in pipeline)."""
+    """GET /wrapping/talent: Talent.com XML from artifact or live jooble_job_feed."""
+    cached = _response_from_artifact(session, "talent")
+    if cached is not None:
+        return cached
     rows = get_jooble_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
         rows,
@@ -392,7 +419,10 @@ async def get_wrapping_talent(session: Session = Depends(get_session)) -> Respon
 
 
 async def get_wrapping_jooble_abroad(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble/abroad: Jooble XML for enterprise jobs abroad (jooble_abroad_job_feed)."""
+    """GET /wrapping/jooble/abroad: Jooble abroad XML from artifact or live jooble_abroad_job_feed."""
+    cached = _response_from_artifact(session, "jooble_abroad")
+    if cached is not None:
+        return cached
     rows = get_jooble_abroad_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
         rows,
@@ -429,7 +459,10 @@ async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Resp
 
 
 async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/adzuna: Adzuna XML from adzuna_job_feed (Italy, CPC from priority)."""
+    """GET /wrapping/adzuna: Adzuna XML from artifact or live adzuna_job_feed (ITA+ESP, CPC from priority)."""
+    cached = _response_from_artifact(session, "adzuna")
+    if cached is not None:
+        return cached
     rows = get_adzuna_job_feed_rows(session)
     xml_content = generate_adzuna_xml(rows)
     return Response(

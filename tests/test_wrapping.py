@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import os
 from datetime import date, datetime, timezone
 from typing import Generator
@@ -347,6 +348,41 @@ def test_wrapping_talent_falls_back_to_runtime_sanitize(client: TestClient):
     assert talent.status_code == 200
     assert "**" not in talent.text
     assert "<strong>Hello</strong>" in talent.text
+
+
+def test_wrapping_serves_gzip_artifact(client: TestClient):
+    """When feed_xml_artifact exists, Talent streams gzip instead of building live."""
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<source>\n"
+        " <lastBuildDate> Wed, 22 Oct 2026 00:00:00 GMT </lastBuildDate>\n"
+        " <job><partnerJobId><![CDATA[artifact-1]]></partnerJobId></job>\n"
+        "</source>"
+    )
+    payload = gzip.compress(xml.encode("utf-8"))
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        s.add(
+            models.FeedXmlArtifact(
+                feed_name="talent",
+                payload=payload,
+                content_type="application/xml",
+                job_count=1,
+                bytes_uncompressed=len(xml.encode("utf-8")),
+                generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+        )
+        s.commit()
+
+    r = client.get("/wrapping/talent")
+    assert r.status_code == 200
+    assert r.headers.get("content-encoding") == "gzip"
+    assert r.headers.get("x-feed-job-count") == "1"
+    # httpx may auto-decompress; body must contain the artifact marker either way
+    body = r.content
+    if body[:2] == b"\x1f\x8b":
+        body = gzip.decompress(body)
+    assert b"artifact-1" in body
 
 
 def test_wrapping_jooble_abroad_empty(client: TestClient):

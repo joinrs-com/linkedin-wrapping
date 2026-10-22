@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -262,3 +264,48 @@ def backfill_jooble_description_talent(
         updated += len(payload)
         print(f"  description_talent backfill progress: +{len(payload)} total={updated}", flush=True)
     return updated
+
+
+def upsert_feed_xml_artifact(
+    dest_conn: Connection,
+    *,
+    feed_name: str,
+    xml_text: str,
+    job_count: int,
+) -> dict[str, Any]:
+    """Gzip XML and UPSERT into lw.feed_xml_artifact (or default schema)."""
+    raw = xml_text.encode("utf-8")
+    payload = gzip.compress(raw, compresslevel=6)
+    generated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    dest_conn.execute(
+        text(
+            """
+            INSERT INTO feed_xml_artifact
+                (feed_name, payload, content_type, job_count, bytes_uncompressed, generated_at)
+            VALUES
+                (:feed_name, :payload, :content_type, :job_count, :bytes_uncompressed, :generated_at)
+            ON DUPLICATE KEY UPDATE
+                payload = VALUES(payload),
+                content_type = VALUES(content_type),
+                job_count = VALUES(job_count),
+                bytes_uncompressed = VALUES(bytes_uncompressed),
+                generated_at = VALUES(generated_at)
+            """
+        ),
+        {
+            "feed_name": feed_name,
+            "payload": payload,
+            "content_type": "application/xml",
+            "job_count": job_count,
+            "bytes_uncompressed": len(raw),
+            "generated_at": generated_at,
+        },
+    )
+    dest_conn.commit()
+    return {
+        "feed_name": feed_name,
+        "job_count": job_count,
+        "bytes_uncompressed": len(raw),
+        "bytes_gzip": len(payload),
+        "generated_at": generated_at.isoformat(),
+    }
