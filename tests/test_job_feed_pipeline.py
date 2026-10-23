@@ -143,6 +143,22 @@ def test_sync_refresh_descriptions_normalizes_html(sqlite_pair):
     assert "**" not in rows[1]
     assert "<strong>Hello</strong>" in rows[1]
 
+    # Second pass: already up-to-date rows are skipped (resume / re-run).
+    with src.connect() as src_conn, dest.connect() as dest_conn:
+        again = sync_feed_table(
+            dest_conn,
+            src_conn,
+            table="feed",
+            select_sql=select_sql,
+            columns=["id", "description", "title"],
+            id_column="id",
+            description_column="description",
+            normalize_html=True,
+            refresh_descriptions=True,
+        )
+    assert again.updated == 0
+    assert again.deleted == 0
+
 
 def test_insert_rows_uses_multi_row_insert_per_chunk(sqlite_pair):
     """One execute per chunk (multi-row VALUES), not one execute per row."""

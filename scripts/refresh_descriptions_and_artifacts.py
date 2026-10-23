@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Refresh Jooble/Adzuna/abroad descriptions (no intro + HTML) and regenerate gzip artifacts.
 
+Safe to interrupt and re-run: already-updated descriptions are skipped (resume).
+
 Run in Terminal.app with VPN (Cursor agent cannot use VPN DNS):
 
     cd ~/development/linkedin-wrapping

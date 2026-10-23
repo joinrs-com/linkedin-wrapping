@@ -166,6 +166,62 @@ def _prepare_row_payload(
     return payload
 
 
+def _load_existing_descriptions(
+    conn: Connection,
+    table: str,
+    id_column: str,
+    description_column: str,
+    ids: list,
+    *,
+    string_id: bool = False,
+    also_talent: bool = False,
+    chunk_size: int = 500,
+) -> dict[Any, dict[str, Any]]:
+    """Map id → current description (+ optional description_talent) on dest."""
+    if not ids:
+        return {}
+    cols = f"{id_column}, {description_column}"
+    if also_talent:
+        cols += ", description_talent"
+    out: dict[Any, dict[str, Any]] = {}
+    for chunk in _chunked(list(ids), chunk_size):
+        placeholders = ", ".join(f":id{i}" for i in range(len(chunk)))
+        params = {f"id{i}": v for i, v in enumerate(chunk)}
+        rows = conn.execute(
+            text(f"SELECT {cols} FROM {table} WHERE {id_column} IN ({placeholders})"),
+            params,
+        ).fetchall()
+        for r in rows:
+            entry = {description_column: r[1]}
+            if also_talent:
+                entry["description_talent"] = r[2]
+            out[_normalize_id(r[0], as_string=string_id)] = entry
+    return out
+
+
+def _filter_stale_description_rows(
+    rows: list[dict[str, Any]],
+    existing: dict[Any, dict[str, Any]],
+    description_column: str,
+    *,
+    also_talent: bool = False,
+) -> list[dict[str, Any]]:
+    """Keep only rows whose dest description differs from the new payload (resume-safe)."""
+    stale: list[dict[str, Any]] = []
+    for r in rows:
+        cur = existing.get(r["id"])
+        if cur is None:
+            stale.append(r)
+            continue
+        if cur.get(description_column) != r.get(description_column):
+            stale.append(r)
+            continue
+        if also_talent and cur.get("description_talent") != r.get("description_talent"):
+            stale.append(r)
+            continue
+    return stale
+
+
 def _update_description_rows(
     conn: Connection,
     table: str,
@@ -221,6 +277,8 @@ def sync_feed_table(
     Incremental sync: DELETE expired + INSERT new.
     When refresh_descriptions=True (and description_column set), also UPDATE
     description for existing active ids (used after intro/HTML changes).
+    Skips ids whose dest description already matches the new payload, so an
+    interrupted refresh can resume without re-writing completed rows.
     """
     enriched = enriched or {}
 
@@ -293,12 +351,34 @@ def sync_feed_table(
                     "description_talent": payload.get("description_talent"),
                 }
             )
+        existing_desc = _load_existing_descriptions(
+            dest_conn,
+            table,
+            id_column,
+            description_column,
+            [r["id"] for r in refresh_rows],
+            string_id=string_id,
+            also_talent=need_talent_desc,
+        )
+        stale_rows = _filter_stale_description_rows(
+            refresh_rows,
+            existing_desc,
+            description_column,
+            also_talent=need_talent_desc,
+        )
+        skipped = len(refresh_rows) - len(stale_rows)
+        if skipped:
+            print(
+                f"  description refresh: skip {skipped} already up-to-date, "
+                f"update {len(stale_rows)}",
+                flush=True,
+            )
         updated = _update_description_rows(
             dest_conn,
             table,
             id_column,
             description_column,
-            refresh_rows,
+            stale_rows,
             also_talent=need_talent_desc,
         )
 
