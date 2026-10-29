@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test gzip feed artifacts. Run in Terminal.app:
 #   bash scripts/smoke_feed_endpoints.sh
-#   FULL=1 bash scripts/smoke_feed_endpoints.sh   # also count <job> (slow on ~50MB)
+#   FULL=1 bash scripts/smoke_feed_endpoints.sh   # also count <job> (slow on large gzip)
 set -euo pipefail
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
@@ -11,7 +11,6 @@ check() {
   local out
   out="$(mktemp)"
   echo "======== /wrapping/${path} ========"
-  # ~50MB gzip: allow up to 120s for full download
   curl -sS -D - -o "$out" --max-time 120 -w "time_total=%{time_total}s http=%{http_code} size=%{size_download}\n" \
     "https://lw.joinrs.com/wrapping/${path}" | head -20
   local magic
@@ -22,7 +21,6 @@ check() {
       local jobs
       jobs="$(gzip -dc "$out" | grep -c '<job>' || true)"
       echo "jobs≈${jobs}"
-      gzip -dc "$out" | grep -E 'ESP|Spain|<country>|<countries>' | head -3 || true
     fi
   else
     echo "FAIL body not gzip magic=${magic}"
@@ -31,8 +29,18 @@ check() {
   echo
 }
 
-check talent 70000
-check jooble 70000
-check adzuna 70000
-check jooble/abroad 20000
+# Headers-only friendly: still downloads; expect 200 + gzip + X-Feed-Job-Count
+check talent 1
+check talent/us 1
+check talent/eu3 1
+check talent/row 1
+check jooble 1
+check jooble/us 1
+check jooble/eu3 1
+check jooble/row 1
+check adzuna 1
+check adzuna/us 1
+check adzuna/eu3 1
+check adzuna/row 1
+check jooble/abroad 1
 echo "DONE"

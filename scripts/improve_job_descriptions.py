@@ -139,12 +139,21 @@ def create_database_engine():
             "nella password codifica i caratteri speciali con urllib.parse.quote_plus."
         ) from None
 
+    connect_args: dict = {}
+    if "sqlite" in url:
+        connect_args = {"check_same_thread": False}
+    elif "mysql" in url:
+        connect_args = {
+            "connect_timeout": 60,
+            "read_timeout": 600,
+            "write_timeout": 600,
+        }
     engine = create_engine(
         url,
-        pool_recycle=3600,
+        pool_recycle=1800,
         pool_pre_ping=True,
         echo=False,
-        connect_args={"check_same_thread": False} if "sqlite" in url else {},
+        connect_args=connect_args,
     )
     
     # Gestione schema per MySQL

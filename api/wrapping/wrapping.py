@@ -202,7 +202,7 @@ def generate_whatjobs_xml(rows: list) -> str:
 
 
 def generate_adzuna_xml(rows: list) -> str:
-    """Adzuna XML (Italy CPC feed)."""
+    """Adzuna XML (CPC required; country ISO2; optional country_code alpha-3 for campaigns)."""
     parts: list[str] = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
     parts.append("<jobs>")
@@ -214,6 +214,7 @@ def generate_adzuna_xml(rows: list) -> str:
         parts.extend(_whatjobs_cdata_lines("url", getattr(job, "url", None), required=True))
         parts.extend(_whatjobs_cdata_lines("location", getattr(job, "location", None), required=True))
         parts.extend(_whatjobs_cdata_lines("country", getattr(job, "country", None), required=True))
+        parts.extend(_whatjobs_cdata_lines("country_code", getattr(job, "country_code", None)))
         parts.extend(_whatjobs_cdata_lines("remote", getattr(job, "remote", None)))
         parts.extend(_whatjobs_cdata_lines("salary", getattr(job, "salary", None)))
         parts.extend(_whatjobs_cdata_lines("company", getattr(job, "company", None)))
@@ -303,6 +304,7 @@ def generate_wrapping_xml(
     include_priority: bool = False,
     include_employers_id: bool = False,
     include_countries: bool = False,
+    include_country_code: bool = False,
     description_sanitizer: Callable[[str | None], str] | None = None,
 ) -> str:
     """
@@ -313,6 +315,7 @@ def generate_wrapping_xml(
     - If include_priority is true, outputs <priority> (empty if missing).
     - If include_employers_id is true, outputs <employers_id> from job_postings.employers_id (Jooble only).
     - If include_countries is true, outputs <countries> after <location> (Jooble abroad feed only).
+    - If include_country_code is true, outputs <countryCode> (campaign filters; no CPC on Jooble/Talent).
     - description_sanitizer: optional callable applied to each description before CDATA (Talent.com).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
@@ -355,6 +358,8 @@ def generate_wrapping_xml(
         company_id = _escape_cdata(getattr(job, "company_id", None) or "")
         location = _escape_cdata(getattr(job, "location", None) or "")
         countries = _escape_cdata(getattr(job, "countries", None) or "")
+        country_code_raw = getattr(job, "country_code", None) or getattr(job, "countries", None) or ""
+        country_code = _escape_cdata(str(country_code_raw))
         workplace_types = _escape_cdata(getattr(job, "workplace_types", None) or "")
         experience_level = _escape_cdata(getattr(job, "experience_level", None) or "")
         jobtype = _escape_cdata(getattr(job, "jobtype", None) or "")
@@ -380,6 +385,8 @@ def generate_wrapping_xml(
         parts.append(f"  <location><![CDATA[{location}]]></location>")
         if include_countries:
             parts.append(f"  <countries><![CDATA[{countries}]]></countries>")
+        if include_country_code:
+            parts.append(f"  <countryCode><![CDATA[{country_code}]]></countryCode>")
         parts.append(f"  <workplaceTypes><![CDATA[{workplace_types}]]></workplaceTypes>")
         parts.append(f"  <experienceLevel><![CDATA[{experience_level}]]></experienceLevel>")
         parts.append(f"  <jobtype><![CDATA[{jobtype}]]></jobtype>")
@@ -392,51 +399,105 @@ def generate_wrapping_xml(
     return "\n".join(parts)
 
 
-async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble: XML from artifact or live jooble_job_feed."""
-    cached = _response_from_artifact(session, "jooble")
-    if cached is not None:
-        return cached
-    rows = get_jooble_job_feed_rows(session)
-    xml_content = generate_wrapping_xml(
+def _jooble_talent_live_xml(
+    session: Session,
+    *,
+    bucket: str,
+    talent: bool,
+) -> str:
+    rows = get_jooble_job_feed_rows(session, bucket=bucket)
+    return generate_wrapping_xml(
         rows,
         apply_url_mode="jooble",
         prefer_employers_name_as_company=True,
         include_priority=True,
         include_employers_id=True,
+        include_country_code=True,
+        description_sanitizer=normalize_description_for_talent if talent else None,
     )
-    return Response(
-        content=xml_content.encode('utf-8'),
-        media_type="application/xml; charset=utf-8"
-    )
+
+
+async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/jooble: ITA+ESP bucket (artifact key jooble / jooble_ita_esp)."""
+    cached = _response_from_artifact(session, "jooble")
+    if cached is None:
+        cached = _response_from_artifact(session, "jooble_ita_esp")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="ita_esp", talent=False)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
+async def get_wrapping_jooble_us(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/jooble/us: USA bucket."""
+    cached = _response_from_artifact(session, "jooble_usa")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="usa", talent=False)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
+async def get_wrapping_jooble_eu3(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/jooble/eu3: FRA+GBR+DEU bucket."""
+    cached = _response_from_artifact(session, "jooble_eu3")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="eu3", talent=False)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
+async def get_wrapping_jooble_row(session: Session = Depends(get_session)) -> Response:
+    """GET /wrapping/jooble/row: rest-of-world bucket."""
+    cached = _response_from_artifact(session, "jooble_row")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="row", talent=False)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
 
 
 async def get_wrapping_talent(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/talent: Talent.com XML from artifact or live jooble_job_feed."""
+    """GET /wrapping/talent: ITA+ESP bucket."""
     cached = _response_from_artifact(session, "talent")
+    if cached is None:
+        cached = _response_from_artifact(session, "talent_ita_esp")
     if cached is not None:
         return cached
-    rows = get_jooble_job_feed_rows(session)
-    xml_content = generate_wrapping_xml(
-        rows,
-        apply_url_mode="jooble",
-        prefer_employers_name_as_company=True,
-        include_priority=True,
-        include_employers_id=True,
-        description_sanitizer=normalize_description_for_talent,
-    )
-    return Response(
-        content=xml_content.encode("utf-8"),
-        media_type="application/xml; charset=utf-8",
-    )
+    xml_content = _jooble_talent_live_xml(session, bucket="ita_esp", talent=True)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
+async def get_wrapping_talent_us(session: Session = Depends(get_session)) -> Response:
+    cached = _response_from_artifact(session, "talent_usa")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="usa", talent=True)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
+async def get_wrapping_talent_eu3(session: Session = Depends(get_session)) -> Response:
+    cached = _response_from_artifact(session, "talent_eu3")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="eu3", talent=True)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
+async def get_wrapping_talent_row(session: Session = Depends(get_session)) -> Response:
+    cached = _response_from_artifact(session, "talent_row")
+    if cached is not None:
+        return cached
+    xml_content = _jooble_talent_live_xml(session, bucket="row", talent=True)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
 
 
 async def get_wrapping_jooble_abroad(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble/abroad: Jooble abroad XML from artifact or live jooble_abroad_job_feed."""
+    """Deprecated: prefer /jooble/us, /eu3, /row. Artifact = usa∪eu3∪row."""
     cached = _response_from_artifact(session, "jooble_abroad")
     if cached is not None:
         return cached
-    rows = get_jooble_abroad_job_feed_rows(session)
+    rows = get_jooble_job_feed_rows(session, buckets=["usa", "eu3", "row"])
+    if not rows:
+        rows = get_jooble_abroad_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
         rows,
         apply_url_mode="jooble",
@@ -444,11 +505,9 @@ async def get_wrapping_jooble_abroad(session: Session = Depends(get_session)) ->
         include_priority=True,
         include_employers_id=True,
         include_countries=True,
+        include_country_code=True,
     )
-    return Response(
-        content=xml_content.encode("utf-8"),
-        media_type="application/xml; charset=utf-8",
-    )
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
 
 
 async def get_wrapping_hirematic(session: Session = Depends(get_session)) -> Response:
@@ -472,14 +531,48 @@ async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Resp
 
 
 async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/adzuna: Adzuna XML from artifact or live adzuna_job_feed (ITA+ESP, CPC from priority)."""
+    """GET /wrapping/adzuna: ITA+ESP bucket (CPC required)."""
     cached = _response_from_artifact(session, "adzuna")
+    if cached is None:
+        cached = _response_from_artifact(session, "adzuna_ita_esp")
     if cached is not None:
         return cached
-    rows = get_adzuna_job_feed_rows(session)
-    xml_content = generate_adzuna_xml(rows)
+    rows = get_adzuna_job_feed_rows(session, bucket="ita_esp")
     return Response(
-        content=xml_content.encode("utf-8"),
+        content=generate_adzuna_xml(rows).encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+async def get_wrapping_adzuna_us(session: Session = Depends(get_session)) -> Response:
+    cached = _response_from_artifact(session, "adzuna_usa")
+    if cached is not None:
+        return cached
+    rows = get_adzuna_job_feed_rows(session, bucket="usa")
+    return Response(
+        content=generate_adzuna_xml(rows).encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+async def get_wrapping_adzuna_eu3(session: Session = Depends(get_session)) -> Response:
+    cached = _response_from_artifact(session, "adzuna_eu3")
+    if cached is not None:
+        return cached
+    rows = get_adzuna_job_feed_rows(session, bucket="eu3")
+    return Response(
+        content=generate_adzuna_xml(rows).encode("utf-8"),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+async def get_wrapping_adzuna_row(session: Session = Depends(get_session)) -> Response:
+    cached = _response_from_artifact(session, "adzuna_row")
+    if cached is not None:
+        return cached
+    rows = get_adzuna_job_feed_rows(session, bucket="row")
+    return Response(
+        content=generate_adzuna_xml(rows).encode("utf-8"),
         media_type="application/xml; charset=utf-8",
     )
 

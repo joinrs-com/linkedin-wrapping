@@ -1,59 +1,15 @@
--- Italy + Spain jobs for Adzuna feed (GET /wrapping/adzuna).
--- Output columns match lw.adzuna_job_feed (one row per ITA/ESP city; id = job_id-ord).
+-- Full-catalog Adzuna explode (GET /wrapping/adzuna + /us|/eu3|/row).
+-- One row per city label or country-only fallback; bucket = ita_esp|usa|eu3|row.
 -- Description: body only (no employer intro). HTML normalized in pipeline.
--- No [#J-…] / [#LI-…] tags.
--- CPC from priority: 1→0.08, 2→0.07, 3→0.03, 4→0.03, 5→0.
--- country XML: IT or ES.
+-- CPC from priority: 1→0.08, 2→0.07, 3→0.03, 4→0.03, 5→0. country = ISO2.
+-- All priorities/products (blacklist employer 1179402).
 
-WITH country_rows AS (
-    SELECT
-        jp.id AS job_posting_id,
-        jt.country_code
-    FROM job_postings.job_postings_1 jp
-    LEFT JOIN JSON_TABLE(
-        CASE
-            WHEN JSON_VALID(jp.locations) THEN jp.locations
-            ELSE '{"cities":[]}'
-        END,
-        '$.cities[*]'
-        COLUMNS (
-            country_code VARCHAR(10) PATH '$.country_code'
-        )
-    ) jt ON TRUE
-
-    UNION ALL
-
-    SELECT
-        jp.id AS job_posting_id,
-        jt.country_code
-    FROM job_postings.job_postings_1 jp
-    LEFT JOIN JSON_TABLE(
-        CASE
-            WHEN JSON_VALID(jp.locations) THEN jp.locations
-            ELSE '{"countries":[]}'
-        END,
-        '$.countries[*]'
-        COLUMNS (
-            country_code VARCHAR(10) PATH '$.country_code'
-        )
-    ) jt ON TRUE
-),
-
-country_agg AS (
-    SELECT
-        cr.job_posting_id,
-        MAX(CASE WHEN cr.country_code = 'ITA' THEN 1 ELSE 0 END) AS has_ita,
-        MAX(CASE WHEN cr.country_code = 'ESP' THEN 1 ELSE 0 END) AS has_esp
-    FROM country_rows cr
-    GROUP BY cr.job_posting_id
-),
-
-feed_cities AS (
+WITH feed_cities AS (
     SELECT
         jp.id AS job_posting_id,
         jt.ord AS city_ord,
         TRIM(SUBSTRING_INDEX(jt.city_label, ' - ', 1)) AS city_name,
-        jt.country_code
+        UPPER(TRIM(jt.country_code)) AS country_code
     FROM job_postings.job_postings_1 jp
     INNER JOIN JSON_TABLE(
         CASE
@@ -67,11 +23,29 @@ feed_cities AS (
             country_code VARCHAR(10) PATH '$.country_code'
         )
     ) jt ON TRUE
-    WHERE jt.country_code IN ('ITA', 'ESP')
-      AND NULLIF(TRIM(jt.city_label), '') IS NOT NULL
+    WHERE NULLIF(TRIM(jt.city_label), '') IS NOT NULL
+      AND NULLIF(TRIM(jt.country_code), '') IS NOT NULL
 ),
 
-city_list_agg AS (
+country_only AS (
+    SELECT DISTINCT
+        jp.id AS job_posting_id,
+        UPPER(TRIM(jt.country_code)) AS country_code
+    FROM job_postings.job_postings_1 jp
+    INNER JOIN JSON_TABLE(
+        CASE
+            WHEN JSON_VALID(jp.locations) THEN jp.locations
+            ELSE '{"countries":[]}'
+        END,
+        '$.countries[*]'
+        COLUMNS (
+            country_code VARCHAR(10) PATH '$.country_code'
+        )
+    ) jt ON TRUE
+    WHERE NULLIF(TRIM(jt.country_code), '') IS NOT NULL
+),
+
+cities_by_country AS (
     SELECT
         fc.job_posting_id,
         fc.country_code,
@@ -85,36 +59,21 @@ location_rows AS (
         fc.job_posting_id,
         fc.city_ord,
         fc.city_name AS location,
-        fc.country_code AS countries
+        fc.country_code
     FROM feed_cities fc
 
     UNION ALL
 
     SELECT
-        ca.job_posting_id,
-        1 AS city_ord,
-        'Italy' AS location,
-        'ITA' AS countries
-    FROM country_agg ca
-    LEFT JOIN city_list_agg cla
-        ON cla.job_posting_id = ca.job_posting_id
-       AND cla.country_code = 'ITA'
-    WHERE ca.has_ita = 1
-      AND COALESCE(cla.city_count, 0) = 0
-
-    UNION ALL
-
-    SELECT
-        ca.job_posting_id,
-        100001 AS city_ord,
-        'Spain' AS location,
-        'ESP' AS countries
-    FROM country_agg ca
-    LEFT JOIN city_list_agg cla
-        ON cla.job_posting_id = ca.job_posting_id
-       AND cla.country_code = 'ESP'
-    WHERE ca.has_esp = 1
-      AND COALESCE(cla.city_count, 0) = 0
+        co.job_posting_id,
+        CAST(100000 + (CRC32(co.country_code) % 89999) AS UNSIGNED) AS city_ord,
+        co.country_code AS location,
+        co.country_code
+    FROM country_only co
+    LEFT JOIN cities_by_country cbc
+        ON cbc.job_posting_id = co.job_posting_id
+       AND cbc.country_code = co.country_code
+    WHERE COALESCE(cbc.city_count, 0) = 0
 ),
 
 workmode_rows AS (
@@ -253,9 +212,6 @@ prepared AS (
         ON wa.job_posting_id = jp.id
     LEFT JOIN salary_formatted sf
         ON sf.job_posting_id = jp.id
-    INNER JOIN country_agg ca
-        ON ca.job_posting_id = jp.id
-        AND (ca.has_ita = 1 OR ca.has_esp = 1)
 ),
 
 extracted AS (
@@ -305,7 +261,25 @@ SELECT
 
     lr.location AS location,
 
-    CASE WHEN lr.countries = 'ESP' THEN 'ES' ELSE 'IT' END AS country,
+    CASE lr.country_code
+        WHEN 'ITA' THEN 'IT'
+        WHEN 'ESP' THEN 'ES'
+        WHEN 'USA' THEN 'US'
+        WHEN 'FRA' THEN 'FR'
+        WHEN 'GBR' THEN 'GB'
+        WHEN 'DEU' THEN 'DE'
+        WHEN 'NLD' THEN 'NL'
+        WHEN 'BEL' THEN 'BE'
+        WHEN 'CHE' THEN 'CH'
+        WHEN 'AUT' THEN 'AT'
+        WHEN 'PRT' THEN 'PT'
+        WHEN 'POL' THEN 'PL'
+        WHEN 'IRL' THEN 'IE'
+        WHEN 'CAN' THEN 'CA'
+        WHEN 'AUS' THEN 'AU'
+        WHEN 'BRA' THEN 'BR'
+        ELSE LEFT(lr.country_code, 2)
+    END AS country,
 
     CASE
         WHEN n.all_workmodes LIKE '%Remote%' THEN 'Remote'
@@ -332,19 +306,22 @@ SELECT
         ELSE 0
     END AS cpc,
 
-    n.priority AS priority
+    n.priority AS priority,
+
+    lr.country_code AS country_code,
+
+    CASE
+        WHEN lr.country_code IN ('ITA', 'ESP') THEN 'ita_esp'
+        WHEN lr.country_code = 'USA' THEN 'usa'
+        WHEN lr.country_code IN ('FRA', 'GBR', 'DEU') THEN 'eu3'
+        ELSE 'row'
+    END AS bucket
 
 FROM normalized n
 INNER JOIN location_rows lr
     ON lr.job_posting_id = n.id
 
-WHERE
-    (
-        n.product IN ('pro', 'one', 'pro_unlimited')
-        OR n.product IS NULL
-    )
-    AND n.priority IN (1, 2, 3, 4, 5)
-    AND n.employers_id <> 1179402
+WHERE n.employers_id <> 1179402
 
 ORDER BY
     n.priority ASC,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -17,6 +18,7 @@ sys.path.insert(0, str(project_root / "scripts"))
 from job_feed_common import (  # noqa: E402
     _insert_rows,
     load_sql,
+    slim_feed_select_sql,
     sync_feed_table,
 )
 
@@ -37,6 +39,72 @@ def test_load_sql_preserves_mysql_percent_literals(tmp_path):
     compiled = str(text(out).compile(dialect=create_engine("mysql+pymysql://").dialect))
     assert "%%d.%%m.%%Y" in compiled
     assert "%%Remote%%" in compiled
+
+
+def test_slim_feed_select_sql_strips_jooble_description():
+    sql = load_sql(project_root, "jooble_job_feed_select.sql")
+    slim = slim_feed_select_sql(sql)
+    assert "CAST(NULL AS CHAR) AS description" in slim
+    assert "CONCAT('<p>', n.description, '</p>') AS description" not in slim
+
+
+def test_two_phase_sync_fetches_description_for_new_jobs():
+    """Slim SELECT + mocked body fetch fills description on insert."""
+    src = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    dest = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with dest.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE feed (
+                    id TEXT PRIMARY KEY,
+                    job_posting_id INTEGER,
+                    description TEXT,
+                    title TEXT
+                )
+                """
+            )
+        )
+
+    # Expression must match slim_feed_select_sql regex (n.description).
+    select_sql = """
+        SELECT '99-1' AS id, 99 AS job_posting_id,
+               CONCAT('<p>', n.description, '</p>') AS description,
+               't' AS title
+        FROM (SELECT 'ignored' AS description) AS n
+    """
+
+    with patch(
+        "job_feed_common._fetch_job_descriptions",
+        return_value={99: "<p>from-source</p>"},
+    ):
+        with src.connect() as src_conn, dest.connect() as dest_conn:
+            result = sync_feed_table(
+                dest_conn,
+                src_conn,
+                table="feed",
+                select_sql=select_sql,
+                columns=["id", "job_posting_id", "description", "title"],
+                id_column="id",
+                description_column="description",
+                string_id=True,
+                two_phase_descriptions=True,
+            )
+
+    assert result.inserted == 1
+    with dest.connect() as conn:
+        row = conn.execute(
+            text("SELECT description FROM feed WHERE id = '99-1'")
+        ).fetchone()
+    assert row[0] == "<p>from-source</p>"
 
 
 @pytest.fixture()
@@ -158,6 +226,84 @@ def test_sync_refresh_descriptions_normalizes_html(sqlite_pair):
         )
     assert again.updated == 0
     assert again.deleted == 0
+
+
+def test_sync_refresh_normalizes_once_per_job_posting_id():
+    """Explode rows of the same job_posting_id share one HTML normalize + one UPDATE."""
+    src = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    dest = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with dest.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE feed (
+                    id TEXT PRIMARY KEY,
+                    job_posting_id INTEGER,
+                    description TEXT,
+                    title TEXT
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO feed (id, job_posting_id, description, title) VALUES "
+                "('10-1', 10, 'old', 'a'), ('10-2', 10, 'old', 'b'), ('11-1', 11, 'old', 'c')"
+            )
+        )
+
+    select_sql = """
+        SELECT '10-1' AS id, 10 AS job_posting_id, '<p>**Same**</p>' AS description, 'a' AS title
+        UNION ALL SELECT '10-2', 10, '<p>**Same**</p>', 'b'
+        UNION ALL SELECT '11-1', 11, '<p>other</p>', 'c'
+    """
+    calls: list[str] = []
+
+    import api.platforms.talent as talent_mod
+
+    real = talent_mod.normalize_description_for_talent
+
+    def tracking(desc):
+        calls.append(str(desc))
+        return real(desc)
+
+    with (
+        patch.object(talent_mod, "normalize_description_for_talent", side_effect=tracking),
+        src.connect() as src_conn,
+        dest.connect() as dest_conn,
+    ):
+        result = sync_feed_table(
+            dest_conn,
+            src_conn,
+            table="feed",
+            select_sql=select_sql,
+            columns=["id", "job_posting_id", "description", "title"],
+            id_column="id",
+            description_column="description",
+            string_id=True,
+            normalize_html=True,
+            refresh_descriptions=True,
+        )
+
+    # 2 unique jobs normalized (not 3 explode rows)
+    assert len(calls) == 2
+    assert result.updated == 2
+    with dest.connect() as conn:
+        descs = {
+            r[0]: r[1]
+            for r in conn.execute(text("SELECT id, description FROM feed ORDER BY id")).fetchall()
+        }
+    assert descs["10-1"] == descs["10-2"]
+    assert "**" not in descs["10-1"]
+    assert "<strong>Same</strong>" in descs["10-1"]
 
 
 def test_insert_rows_uses_multi_row_insert_per_chunk(sqlite_pair):

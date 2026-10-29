@@ -7,10 +7,13 @@ Uso:
     JOB_FEED_SOURCE_DATABASE_URL    → mysql-production01 (sorgente)
 
     python scripts/run_job_feed_pipeline.py
+    python scripts/run_job_feed_pipeline.py --feeds jooble,adzuna
+    python scripts/run_job_feed_pipeline.py --refresh-descriptions
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -43,13 +46,13 @@ from api.platforms.talent import normalize_description_for_talent  # noqa: E402
 from api.wrapping.models import (  # noqa: E402
     AdzunaJobFeed,
     JobFeedPipelineRun,
-    JoobleAbroadJobFeed,
     JoobleJobFeed,
 )
 from api.wrapping.wrapping import (  # noqa: E402
     generate_adzuna_xml,
     generate_wrapping_xml,
 )
+from feed_buckets import BUCKETS, artifact_name, legacy_root_artifact_name  # noqa: E402
 from sqlmodel import select  # noqa: E402
 
 
@@ -64,7 +67,10 @@ class FeedConfig:
     string_id: bool = False
     # Talent-style HTML normalize + refresh description on existing rows
     normalize_html: bool = False
+    # Opt-in via --refresh-descriptions (cold populate should skip).
     refresh_descriptions: bool = False
+    # Slim catalog SELECT + fetch description only for new job_posting_id.
+    two_phase_descriptions: bool = False
 
 
 FEED_CONFIGS: list[FeedConfig] = [
@@ -92,12 +98,15 @@ FEED_CONFIGS: list[FeedConfig] = [
             "partner_job_id",
             "last_build_date",
             "salary",
+            "country_code",
+            "bucket",
         ],
         id_column="id",
         description_column="description",
         string_id=True,
         normalize_html=True,
-        refresh_descriptions=True,
+        refresh_descriptions=False,
+        two_phase_descriptions=True,
     ),
     FeedConfig(
         name="whatjobs",
@@ -166,12 +175,15 @@ FEED_CONFIGS: list[FeedConfig] = [
             "date",
             "cpc",
             "priority",
+            "country_code",
+            "bucket",
         ],
         id_column="id",
         description_column="description",
         string_id=True,
         normalize_html=True,
-        refresh_descriptions=True,
+        refresh_descriptions=False,
+        two_phase_descriptions=True,
     ),
     FeedConfig(
         name="jobrapido",
@@ -203,36 +215,7 @@ FEED_CONFIGS: list[FeedConfig] = [
         description_column="description",
         string_id=True,
     ),
-    FeedConfig(
-        name="jooble_abroad",
-        table="jooble_abroad_job_feed",
-        sql_file="jooble_abroad_job_feed_select.sql",
-        columns=[
-            "id",
-            "job_posting_id",
-            "position",
-            "employers_name",
-            "employers_id",
-            "priority",
-            "description",
-            "company",
-            "apply_url",
-            "company_id",
-            "location",
-            "countries",
-            "workplace_types",
-            "experience_level",
-            "jobtype",
-            "partner_job_id",
-            "last_build_date",
-            "salary",
-        ],
-        id_column="id",
-        description_column="description",
-        string_id=True,
-        normalize_html=True,
-        refresh_descriptions=True,
-    ),
+    # jooble_abroad_job_feed sync removed: content lives in jooble_job_feed buckets usa|eu3|row
 ]
 
 
@@ -241,42 +224,73 @@ def _utc_now_naive() -> datetime:
 
 
 def _generate_feed_xml_artifacts(dest_engine) -> dict[str, dict]:
-    """Build gzip XML for jooble/talent/adzuna/jooble_abroad and upsert artifacts."""
+    """Build gzip XML per platform × campaign bucket (+ legacy root aliases)."""
     stats: dict[str, dict] = {}
     with Session(dest_engine) as session:
-        jooble_rows = list(session.exec(select(JoobleJobFeed)).all())
-        abroad_rows = list(session.exec(select(JoobleAbroadJobFeed)).all())
-        adzuna_rows = list(session.exec(select(AdzunaJobFeed)).all())
+        jooble_by_bucket: dict[str, list] = {b: [] for b in BUCKETS}
+        for row in session.exec(select(JoobleJobFeed)).all():
+            b = getattr(row, "bucket", None) or "row"
+            jooble_by_bucket.setdefault(b, []).append(row)
 
-    builds = [
-        (
-            "jooble",
-            generate_wrapping_xml(
-                jooble_rows,
-                apply_url_mode="jooble",
-                prefer_employers_name_as_company=True,
-                include_priority=True,
-                include_employers_id=True,
-            ),
-            len(jooble_rows),
-        ),
-        (
-            "talent",
-            generate_wrapping_xml(
-                jooble_rows,
-                apply_url_mode="jooble",
-                prefer_employers_name_as_company=True,
-                include_priority=True,
-                include_employers_id=True,
-                description_sanitizer=normalize_description_for_talent,
-            ),
-            len(jooble_rows),
-        ),
-        (
-            "adzuna",
-            generate_adzuna_xml(adzuna_rows),
-            len(adzuna_rows),
-        ),
+        adzuna_by_bucket: dict[str, list] = {b: [] for b in BUCKETS}
+        for row in session.exec(select(AdzunaJobFeed)).all():
+            b = getattr(row, "bucket", None) or "row"
+            adzuna_by_bucket.setdefault(b, []).append(row)
+
+    builds: list[tuple[str, str, int]] = []
+    for bucket in BUCKETS:
+        j_rows = jooble_by_bucket.get(bucket, [])
+        a_rows = adzuna_by_bucket.get(bucket, [])
+        builds.append(
+            (
+                artifact_name("jooble", bucket),
+                generate_wrapping_xml(
+                    j_rows,
+                    apply_url_mode="jooble",
+                    prefer_employers_name_as_company=True,
+                    include_priority=True,
+                    include_employers_id=True,
+                    include_country_code=True,
+                ),
+                len(j_rows),
+            )
+        )
+        builds.append(
+            (
+                artifact_name("talent", bucket),
+                generate_wrapping_xml(
+                    j_rows,
+                    apply_url_mode="jooble",
+                    prefer_employers_name_as_company=True,
+                    include_priority=True,
+                    include_employers_id=True,
+                    include_country_code=True,
+                    description_sanitizer=normalize_description_for_talent,
+                ),
+                len(j_rows),
+            )
+        )
+        builds.append(
+            (
+                artifact_name("adzuna", bucket),
+                generate_adzuna_xml(a_rows),
+                len(a_rows),
+            )
+        )
+
+    # Compat: /wrapping/jooble|talent|adzuna still resolve artifact keys without suffix
+    for platform in ("jooble", "talent", "adzuna"):
+        src_key = artifact_name(platform, "ita_esp")
+        for feed_name, xml_text, job_count in list(builds):
+            if feed_name == src_key:
+                builds.append((legacy_root_artifact_name(platform), xml_text, job_count))
+                break
+
+    # Compat: /wrapping/jooble/abroad → usa∪eu3∪row (deprecated; prefer /us /eu3 /row)
+    abroad_rows: list = []
+    for b in ("usa", "eu3", "row"):
+        abroad_rows.extend(jooble_by_bucket.get(b, []))
+    builds.append(
         (
             "jooble_abroad",
             generate_wrapping_xml(
@@ -286,10 +300,11 @@ def _generate_feed_xml_artifacts(dest_engine) -> dict[str, dict]:
                 include_priority=True,
                 include_employers_id=True,
                 include_countries=True,
+                include_country_code=True,
             ),
             len(abroad_rows),
-        ),
-    ]
+        )
+    )
 
     with dest_engine.connect() as dest_conn:
         for feed_name, xml_text, job_count in builds:
@@ -389,7 +404,11 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
         session.commit()
 
 
-def run_pipeline() -> dict:
+def run_pipeline(
+    *,
+    feed_names: list[str] | None = None,
+    refresh_descriptions: bool | None = None,
+) -> dict:
     if not os.getenv("DATABASE_URL"):
         raise SystemExit("DATABASE_URL non impostata")
     if not os.getenv("JOB_FEED_SOURCE_DATABASE_URL"):
@@ -402,15 +421,36 @@ def run_pipeline() -> dict:
     enrichment = ijd.EnrichmentResult(processed=0, deleted=0, total=0, eligible_active=0)
     feed_results: dict[str, SyncResult] = {}
 
+    configs = FEED_CONFIGS
+    if feed_names:
+        wanted = {n.strip().lower() for n in feed_names if n.strip()}
+        known = {c.name for c in FEED_CONFIGS}
+        unknown = wanted - known
+        if unknown:
+            raise SystemExit(
+                f"Feed sconosciuti: {sorted(unknown)}. Validi: {sorted(known)}"
+            )
+        configs = [c for c in FEED_CONFIGS if c.name in wanted]
+
     try:
         # Fresh connections per phase: long-lived sockets die on MySQL wait_timeout
         # (seen as OperationalError 2013 during Sync adzuna after multi-hour runs).
         print("=" * 60)
         print("Job feed pipeline — OpenAI enrichment skipped")
         print("=" * 60)
+        print(f"Feeds: {', '.join(c.name for c in configs)}")
+        if refresh_descriptions is True:
+            print("Description refresh: ON (--refresh-descriptions)")
+        else:
+            print("Description refresh: OFF (default; pass --refresh-descriptions)")
         enriched: dict[int, str] = {}
 
-        for cfg in FEED_CONFIGS:
+        for cfg in configs:
+            do_refresh = (
+                refresh_descriptions
+                if refresh_descriptions is not None
+                else cfg.refresh_descriptions
+            )
             print("=" * 60)
             print(f"Sync {cfg.name} ({cfg.table})")
             print("=" * 60)
@@ -427,7 +467,8 @@ def run_pipeline() -> dict:
                     enriched=enriched,
                     string_id=cfg.string_id,
                     normalize_html=cfg.normalize_html,
-                    refresh_descriptions=cfg.refresh_descriptions,
+                    refresh_descriptions=do_refresh,
+                    two_phase_descriptions=cfg.two_phase_descriptions,
                 )
             feed_results[cfg.name] = result
             print(
@@ -468,7 +509,7 @@ def run_pipeline() -> dict:
 
     except Exception as e:
         finished_at = _utc_now_naive()
-        partial = feed_results or {c.name: SyncResult(0, 0, 0, 0, 0) for c in FEED_CONFIGS}
+        partial = feed_results or {c.name: SyncResult(0, 0, 0, 0, 0) for c in configs}
         error_message = str(e)
         if isinstance(e, ijd.OpenAIEnrichmentError):
             error_message = (
@@ -492,8 +533,24 @@ def run_pipeline() -> dict:
         raise
 
 
-def main() -> None:
-    run_pipeline()
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Incremental job feed sync pipeline")
+    parser.add_argument(
+        "--feeds",
+        default="",
+        help="Comma-separated feed names (default: all). Example: jooble,adzuna",
+    )
+    parser.add_argument(
+        "--refresh-descriptions",
+        action="store_true",
+        help="Also UPDATE descriptions on existing rows (slow; off by default)",
+    )
+    args = parser.parse_args(argv)
+    feed_names = [p for p in args.feeds.split(",") if p.strip()] or None
+    run_pipeline(
+        feed_names=feed_names,
+        refresh_descriptions=True if args.refresh_descriptions else None,
+    )
 
 
 if __name__ == "__main__":

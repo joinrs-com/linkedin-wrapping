@@ -150,7 +150,7 @@ class HirematicJobFeed(SQLModel, table=True):
 
 
 class JoobleJobFeed(SQLModel, table=True):
-    """Maps `lw.jooble_job_feed`; Italy jobs for Jooble/Talent XML (one row per city)."""
+    """Maps `lw.jooble_job_feed`; Jooble/Talent explode rows (bucketed by country)."""
 
     __tablename__ = "jooble_job_feed"
     __table_args__ = _resolve_schema()
@@ -177,6 +177,8 @@ class JoobleJobFeed(SQLModel, table=True):
     partner_job_id: str | None = None
     last_build_date: datetime | None = None
     salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
+    country_code: str | None = Field(default=None, max_length=10)
+    bucket: str | None = Field(default=None, max_length=16)
 
 
 class JoobleAbroadJobFeed(SQLModel, table=True):
@@ -230,7 +232,7 @@ class WhatjobsJobFeed(SQLModel, table=True):
 
 
 class AdzunaJobFeed(SQLModel, table=True):
-    """Maps `lw.adzuna_job_feed`; Adzuna Italy feed (one row per city, CPC from priority)."""
+    """Maps `lw.adzuna_job_feed`; Adzuna explode rows (bucketed, CPC from priority)."""
 
     __tablename__ = "adzuna_job_feed"
     __table_args__ = _resolve_schema()
@@ -249,6 +251,8 @@ class AdzunaJobFeed(SQLModel, table=True):
     posted_date: date | None = Field(default=None, sa_column=Column("date", Date, nullable=True))
     cpc: float | None = Field(default=None, sa_column=Column("cpc", Numeric(10, 3), nullable=True))
     priority: int | None = None
+    country_code: str | None = Field(default=None, max_length=10)
+    bucket: str | None = Field(default=None, max_length=16)
 
 
 class FeedXmlArtifact(SQLModel, table=True):

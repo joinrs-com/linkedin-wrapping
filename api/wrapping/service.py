@@ -1,4 +1,4 @@
-from sqlalchemy import asc, desc
+from sqlalchemy import asc, desc, or_
 from sqlmodel import Session, select
 from typing import List
 
@@ -31,15 +31,41 @@ def get_hirematic_job_feed_rows(session: Session) -> List[HirematicJobFeed]:
     return list(results.all())
 
 
-def get_jooble_job_feed_rows(session: Session) -> List[JoobleJobFeed]:
-    """All rows from jooble_job_feed for Jooble main XML export."""
+def get_jooble_job_feed_rows(
+    session: Session,
+    *,
+    bucket: str | None = None,
+    buckets: list[str] | None = None,
+) -> List[JoobleJobFeed]:
+    """Rows from jooble_job_feed; optional campaign bucket filter.
+
+    Legacy rows with NULL bucket are treated as ``ita_esp`` (pre-migration).
+    """
     statement = select(JoobleJobFeed)
+    if bucket is not None:
+        if bucket == "ita_esp":
+            statement = statement.where(
+                or_(JoobleJobFeed.bucket == bucket, JoobleJobFeed.bucket.is_(None))
+            )
+        else:
+            statement = statement.where(JoobleJobFeed.bucket == bucket)
+    elif buckets:
+        if "ita_esp" in buckets:
+            statement = statement.where(
+                or_(JoobleJobFeed.bucket.in_(buckets), JoobleJobFeed.bucket.is_(None))
+            )
+        else:
+            statement = statement.where(JoobleJobFeed.bucket.in_(buckets))
+    statement = statement.order_by(
+        asc(JoobleJobFeed.priority),
+        desc(JoobleJobFeed.last_build_date),
+    )
     results = session.exec(statement)
     return list(results.all())
 
 
 def get_jooble_abroad_job_feed_rows(session: Session) -> List[JoobleAbroadJobFeed]:
-    """All rows from jooble_abroad_job_feed for Jooble enterprise abroad XML export."""
+    """Deprecated table; prefer jooble buckets usa|eu3|row. Kept for live fallback."""
     statement = select(JoobleAbroadJobFeed)
     results = session.exec(statement)
     return list(results.all())
@@ -55,9 +81,24 @@ def get_whatjobs_job_feed_rows(session: Session) -> List[WhatjobsJobFeed]:
     return list(results.all())
 
 
-def get_adzuna_job_feed_rows(session: Session) -> List[AdzunaJobFeed]:
-    """All rows from adzuna_job_feed for Adzuna XML export."""
-    statement = select(AdzunaJobFeed).order_by(
+def get_adzuna_job_feed_rows(
+    session: Session,
+    *,
+    bucket: str | None = None,
+) -> List[AdzunaJobFeed]:
+    """Rows from adzuna_job_feed; optional campaign bucket filter.
+
+    Legacy rows with NULL bucket are treated as ``ita_esp``.
+    """
+    statement = select(AdzunaJobFeed)
+    if bucket is not None:
+        if bucket == "ita_esp":
+            statement = statement.where(
+                or_(AdzunaJobFeed.bucket == bucket, AdzunaJobFeed.bucket.is_(None))
+            )
+        else:
+            statement = statement.where(AdzunaJobFeed.bucket == bucket)
+    statement = statement.order_by(
         asc(AdzunaJobFeed.priority),
         desc(AdzunaJobFeed.posted_date),
     )

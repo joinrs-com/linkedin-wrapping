@@ -26,7 +26,8 @@ jobFeedPipeline:
   suspend: false
   schedule: "0 6,15 * * *"
   timeZone: "Europe/Rome"
-  activeDeadlineSeconds: 7200
+  # Full-catalog sync (jooble/adzuna explode) routinely exceeds 2h from cold start.
+  activeDeadlineSeconds: 86400
   sourceDatabaseSecretName: job-feed-source-database-url
   sourceDatabaseSecretKey: job-feed-source-database-url
   openaiSecretName: openai-api-key

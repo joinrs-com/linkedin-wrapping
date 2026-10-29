@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh Jooble/Adzuna/abroad descriptions (no intro + HTML) and regenerate gzip artifacts.
+"""Refresh Jooble/Adzuna descriptions (no intro + HTML) and regenerate gzip artifacts.
 
 Safe to interrupt and re-run: already-updated descriptions are skipped (resume).
 
@@ -34,7 +34,7 @@ def main() -> None:
     src = create_mysql_engine(os.environ["JOB_FEED_SOURCE_DATABASE_URL"])
     dest = ijd.create_database_engine()
 
-    for name in ("jooble", "adzuna", "jooble_abroad"):
+    for name in ("jooble", "adzuna"):
         cfg = next(c for c in FEED_CONFIGS if c.name == name)
         print("=" * 60)
         print(f"Sync {name} (normalize_html={cfg.normalize_html}, refresh={cfg.refresh_descriptions})")

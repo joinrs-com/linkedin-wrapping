@@ -4,47 +4,29 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 ## Features
 
-- GET `/wrapping/jooble` – XML Jooble da artefatto gzip (fallback live da `jooble_job_feed`; ITA+ESP)
-- GET `/wrapping/talent` – come Jooble, description Talent precomputata; artefatto gzip
-- GET `/wrapping/jooble/abroad` – XML Jooble abroad (set enterprise + tutti ESP); artefatto gzip
-- GET `/wrapping/whatjobs` – XML WhatJobs da `whatjobs_job_feed` (annunci Italia)
-- GET `/wrapping/hirematic` – XML Appcast Hirematic da `hirematic_job_feed`
-- GET `/wrapping/adzuna` – XML Adzuna da artefatto gzip (ITA+ESP, CPC da priority)
-- GET `/wrapping/jobrapido` – XML Job Rapido da `jobrapido_job_feed` (schema ufficiale, una riga per job come Adzuna, CPC da priority)
-- Database migrations using Alembic with `lw` schema
-- Helm chart for Kubernetes deployment
-- CI/CD with GitHub Actions
-- Unit tests using pytest
+- GET `/wrapping/jooble` (+ `/us`, `/eu3`, `/row`) – Jooble, 4 bucket campagna; artefatto gzip; **no CPC**; `<countryCode>`
+- GET `/wrapping/talent` (+ `/us`, `/eu3`, `/row`) – stesso universo di Jooble; description Talent; **no CPC**
+- GET `/wrapping/adzuna` (+ `/us`, `/eu3`, `/row`) – stesso universo; **`<cpc>` obbligatorio** da priority; `country` ISO2 + `country_code`
+- GET `/wrapping/jooble/abroad` – **deprecato** (usa `/us` `/eu3` `/row`); artifact = usa∪eu3∪row
+- GET `/wrapping/whatjobs` / `hirematic` / `jobrapido` – invariati
+- Database migrations (`lw`), Helm, CI/CD, pytest
 
 ## Sponsorship feed XML
 
-Matrice degli annunci sponsorizzati per piattaforma (filtri SQL attuali):
+Quattro **bucket fissi** (explode città + country; tutte priority/product; blacklist `1179402`):
 
-| XML | Country | Priority | Note |
-| --- | --- | --- | --- |
-| **LinkedIn** `/wrapping` | — | — | **Rimosso** (endpoint 404; non più in pipeline). SQL legacy in `job_postings_select.sql` non esposto. |
-| **Jooble** `/wrapping/jooble` | ITA **o** ESP | 1–5 | product `pro`/`one`/`pro_unlimited` (o NULL); blacklist `1179402`; **una riga per città ITA/ESP**; `jooble_job_feed`; XML da `feed_xml_artifact` |
-| **Talent** `/wrapping/talent` | come Jooble | come Jooble | stessa tabella; description HTML normalizzata (come Jooble) + artefatto gzip |
-| **WhatJobs** `/wrapping/whatjobs` | solo ITA | 1–5 | stessi product/exclude di Jooble; `region` tipo Città, Italy; `whatjobs_job_feed` |
-| **Hirematic** `/wrapping/hirematic` | IT + ES (prima location ITA/ESP) | 1–3 (+ whitelist) | product `one`/`pro`; whitelist employer `2434743`, `829928` (Renfe); CPC null; `hirematic_job_feed` |
-| **Jooble abroad** `/wrapping/jooble/abroad` | (A) non Italia-only + (B) tutti ESP | A: 1–4 / P5 ESP; B: 1–5 | UNION set enterprise attuale + ESP pieno (NULL product ammesso in B); artefatto gzip |
-| **Adzuna** `/wrapping/adzuna` | ITA **o** ESP | 1–5 | CPC invariato; **una riga per città**; country `IT`/`ES`; artefatto gzip |
-| **Job Rapido** `/wrapping/jobrapido` | solo ITA | 1–5 | stessi CPC di Adzuna; schema XML ufficiale; una riga per job (prima location); `jobrapido_job_feed` |
+| Bucket | Paesi | Path (Jooble / Talent / Adzuna) |
+| --- | --- | --- |
+| `ita_esp` | ITA ∪ ESP | `/wrapping/jooble`, `/talent`, `/adzuna` |
+| `usa` | USA | `…/us` |
+| `eu3` | FRA ∪ GBR ∪ DEU | `…/eu3` |
+| `row` | resto del mondo | `…/row` |
 
-**Volume** (ordine di grandezza post ITA+ESP + artefatti):
+Tabelle: **`jooble_job_feed`** (Jooble+Talent) e **`adzuna_job_feed`**, colonna `bucket` + `country_code`. XML gzip in `feed_xml_artifact` (chiavi `jooble_ita_esp`, `talent_usa`, … + alias legacy `jooble`/`talent`/`adzuna`).
 
-| Endpoint | Righe tipiche | Serving |
-| --- | ---: | --- |
-| Jooble / Talent / Adzuna | ~78–80k | gzip da `lw.feed_xml_artifact` (pipeline); fallback live se assente |
-| Jooble abroad | ~30k | idem |
-| WhatJobs / Job Rapido | ~42k | live (senza artefatto) |
-| Hirematic | ~1k | live |
+Vincoli piattaforma: Jooble/Talent **senza** `<cpc>`; Adzuna **con** CPC (P1=0.08 … P5=0). `priority` e `countryCode`/`country` per filtri campagna.
 
-La pipeline, dopo il sync delle tabelle, genera XML → gzip → UPSERT in `feed_xml_artifact` (`jooble`, `talent`, `adzuna`, `jooble_abroad`). Gli endpoint streamano il blob con `Content-Encoding: gzip`.
-
-**Description:** solo body (niente intro employer). Jooble / Talent / Adzuna / Jooble abroad: HTML normalizzato in pipeline (`p`, `br`, `strong`, `em`, `ul`, `li`) e refresh su righe esistenti a ogni sync. Nessun tag sponsorship. URL `https://www.joinrs.com/jobs/{job_posting_id}` (senza `-n`).
-
-**Ops dopo deploy (description/intro):** con VPN, una run `python scripts/run_job_feed_pipeline.py` (o sync selettivo jooble/adzuna/abroad) aggiorna le description e rigenera `feed_xml_artifact`. Smoke: `bash scripts/smoke_feed_endpoints.sh`.
+**Description:** body only + HTML normalize in pipeline (no OpenAI). Verifica volumi: `python scripts/count_feed_buckets.py` (VPN). Smoke: `bash scripts/smoke_feed_endpoints.sh`. Migrazione: `alembic upgrade head` (fino a `0023`).
 
 ## Setup
 
@@ -185,16 +167,39 @@ Root endpoint with service information.
 
 ## Job feed pipeline (automatica)
 
-`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT nuovi, DELETE scaduti, mai TRUNCATE). Per Jooble/Adzuna/abroad aggiorna anche le `description` esistenti (body-only + HTML normalize) e rigenera gli artefatti gzip. OpenAI enrichment è **disattivato**.
+`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT nuovi, DELETE scaduti, mai TRUNCATE). Jooble/Adzuna usano **two-phase select** (meta senza description, poi body solo per `job_posting_id` nuovi) + HTML normalize. Il refresh delle description esistenti è **off** di default (`--refresh-descriptions` per abilitarlo). OpenAI enrichment è **disattivato**.
 
-Sync: `jooble_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `adzuna_job_feed`, `jobrapido_job_feed`, `jooble_abroad_job_feed`.
+Sync: `jooble_job_feed` (4 bucket), `adzuna_job_feed` (4 bucket), `whatjobs_job_feed`, `hirematic_job_feed`, `jobrapido_job_feed`. (`jooble_abroad_job_feed` non più sincronizzata.)
+
+```bash
+# tutti i feed
+python scripts/run_job_feed_pipeline.py
+# solo alcuni
+python scripts/run_job_feed_pipeline.py --feeds jooble,adzuna
+# anche UPDATE description su row già presenti (lento)
+python scripts/run_job_feed_pipeline.py --refresh-descriptions
+```
 
 **Variabili `.env`:**
 
 - `DATABASE_URL` — joinrs-intelligence / `lw` (destinazione)
 - `JOB_FEED_SOURCE_DATABASE_URL` — mysql-production01 / `job_postings` (sorgente)
 
-**CronJob K8s:** 6:00 e 15:00 Europe/Rome (`helm-chart`, `jobFeedPipeline.enabled: true`).
+**CronJob K8s:** 6:00 e 15:00 Europe/Rome (`helm-chart`, `jobFeedPipeline.enabled: true`). `activeDeadlineSeconds` = 24h. Preferisci il Job in-cluster (VPC → RDS) rispetto al laptop/VPN.
+
+Trigger manuale (richiede `kubectl` + contesto EKS sul namespace `lw`):
+
+```bash
+./scripts/trigger_job_feed_k8s.sh lw
+kubectl logs -f job/job-feed-manual-YYYYMMDD-HHMMSS -n lw
+```
+
+Monitoring conteggi / ultimo run (laptop, VPN + `.env`):
+
+```bash
+python scripts/watch_job_feed_progress.py          # ogni 60s
+python scripts/watch_job_feed_progress.py --once
+```
 
 Report ultimo run:
 
