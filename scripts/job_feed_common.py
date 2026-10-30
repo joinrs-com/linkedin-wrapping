@@ -906,6 +906,20 @@ def sync_feed_table(
                 also_talent=need_talent_desc,
             )
 
+    # Always refresh campaign metadata on keep rows (bucket/country_code/…).
+    # Without this, rows inserted before bucket existed stay NULL forever and
+    # fold into the "row" artifact (seen as ~1.6k ita_esp vs ~82k real ITA/ESP).
+    campaign_updated = _refresh_campaign_fields(
+        dest_conn.engine,
+        table=table,
+        id_column=id_column,
+        columns=columns,
+        keep_ids=keep_ids,
+        rows_by_id=rows_by_id,
+    )
+    if campaign_updated:
+        print(f"  campaign fields refreshed≈{campaign_updated}", flush=True)
+
     # Fresh socket: dest_conn may have been idle through insert + refresh.
     with dest_conn.engine.connect() as count_conn:
         total_row = count_conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
@@ -919,6 +933,52 @@ def sync_feed_table(
         total=total,
         updated=updated,
     )
+
+
+_CAMPAIGN_FIELD_COLS: tuple[str, ...] = ("bucket", "country_code", "countries", "country")
+
+
+def _refresh_campaign_fields(
+    dest_io: Connection | Engine,
+    *,
+    table: str,
+    id_column: str,
+    columns: list[str],
+    keep_ids: list[str | int],
+    rows_by_id: dict[str | int, dict[str, Any]],
+) -> int:
+    """UPDATE bucket/country_* on existing rows from the latest source SELECT."""
+    cols = [c for c in _CAMPAIGN_FIELD_COLS if c in columns]
+    if not cols or not keep_ids:
+        return 0
+    set_sql = ", ".join(f"{c} = :{c}" for c in cols)
+    stmt = text(f"UPDATE {table} SET {set_sql} WHERE {id_column} = :id")
+    updated = 0
+    batch: list[dict[str, Any]] = []
+    batch_size = 500
+
+    def _flush(rows: list[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        eng = dest_io if isinstance(dest_io, Engine) else dest_io.engine
+        with eng.connect() as conn:
+            conn.execute(stmt, rows)
+            conn.commit()
+        return len(rows)
+
+    for nid in keep_ids:
+        src = rows_by_id.get(nid) or {}
+        params: dict[str, Any] = {"id": nid}
+        for c in cols:
+            params[c] = src.get(c)
+        batch.append(params)
+        if len(batch) >= batch_size:
+            updated += _flush(batch)
+            batch = []
+            if updated % 5000 < batch_size:
+                print(f"  campaign fields progress: {updated}/{len(keep_ids)}", flush=True)
+    updated += _flush(batch)
+    return updated
 
 
 def _sanitize_talent_row(item: tuple[Any, Any]) -> dict[str, Any]:
