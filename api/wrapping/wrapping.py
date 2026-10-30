@@ -201,7 +201,7 @@ def generate_whatjobs_xml(rows: list) -> str:
     return "\n".join(parts)
 
 
-def generate_adzuna_xml(rows: list) -> str:
+def generate_adzuna_xml(rows: list, *, max_description_chars: int | None = None) -> str:
     """Adzuna XML (CPC required; country ISO2; optional country_code alpha-3 for campaigns)."""
     parts: list[str] = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
@@ -210,7 +210,8 @@ def generate_adzuna_xml(rows: list) -> str:
         parts.append("  <job>")
         parts.extend(_whatjobs_cdata_lines("title", getattr(job, "title", None), required=True))
         parts.extend(_whatjobs_cdata_lines("id", getattr(job, "id", None), required=True))
-        parts.extend(_whatjobs_cdata_lines("description", getattr(job, "description", None), required=True))
+        desc = _truncate_description(str(getattr(job, "description", None) or ""), max_description_chars)
+        parts.extend(_whatjobs_cdata_lines("description", desc, required=True))
         parts.extend(_whatjobs_cdata_lines("url", getattr(job, "url", None), required=True))
         parts.extend(_whatjobs_cdata_lines("location", getattr(job, "location", None), required=True))
         parts.extend(_whatjobs_cdata_lines("country", getattr(job, "country", None), required=True))
@@ -296,6 +297,13 @@ def generate_jobrapido_xml(rows: list) -> str:
     return "\n".join(parts)
 
 
+def _truncate_description(raw: str, max_chars: int | None) -> str:
+    """Soft-trim long HTML bodies so huge campaign feeds fit in MySQL LONGBLOB packets."""
+    if not max_chars or max_chars <= 0 or len(raw) <= max_chars:
+        return raw
+    return raw[:max_chars]
+
+
 def generate_wrapping_xml(
     job_postings,
     *,
@@ -306,6 +314,7 @@ def generate_wrapping_xml(
     include_countries: bool = False,
     include_country_code: bool = False,
     description_sanitizer: Callable[[str | None], str] | None = None,
+    max_description_chars: int | None = None,
 ) -> str:
     """
     Generate XML for Jooble/Talent wrapping.
@@ -317,6 +326,7 @@ def generate_wrapping_xml(
     - If include_countries is true, outputs <countries> after <location> (Jooble abroad feed only).
     - If include_country_code is true, outputs <countryCode> (campaign filters; no CPC on Jooble/Talent).
     - description_sanitizer: optional callable applied to each description before CDATA (Talent.com).
+    - max_description_chars: optional soft trim for oversized campaign feeds (artifact upload).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
@@ -348,6 +358,7 @@ def generate_wrapping_xml(
                 raw_description = str(precomputed)
             else:
                 raw_description = description_sanitizer(raw_description)
+        raw_description = _truncate_description(str(raw_description), max_description_chars)
         description = _escape_cdata(raw_description)
         raw_apply_url = getattr(job, "apply_url", None) or ""
         if apply_url_mode == "jooble":

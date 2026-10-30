@@ -116,8 +116,8 @@ def create_mysql_engine(url: str) -> Engine:
         echo=False,
         connect_args={
             "connect_timeout": 60,
-            "read_timeout": 600,
-            "write_timeout": 600,
+            "read_timeout": 1800,
+            "write_timeout": 1800,
         },
     )
     if eng.dialect.name != "mysql":
@@ -977,35 +977,75 @@ def upsert_feed_xml_artifact(
     xml_text: str,
     job_count: int,
 ) -> dict[str, Any]:
-    """Gzip XML and UPSERT into lw.feed_xml_artifact (or default schema)."""
+    """Gzip XML and UPSERT into lw.feed_xml_artifact (or default schema).
+
+    Large campaign feeds (e.g. jooble_usa ~100k jobs) produce 100MB+ gzip blobs;
+    raise session max_allowed_packet and use stronger compression before INSERT.
+    """
     raw = xml_text.encode("utf-8")
-    payload = gzip.compress(raw, compresslevel=6)
+    # Stronger gzip for oversized catalogs (USA/row); level 6 is fine for small feeds.
+    compresslevel = 9 if len(raw) >= 50_000_000 else 6
+    payload = gzip.compress(raw, compresslevel=compresslevel)
     generated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    dest_conn.execute(
-        text(
-            """
-            INSERT INTO feed_xml_artifact
-                (feed_name, payload, content_type, job_count, bytes_uncompressed, generated_at)
-            VALUES
-                (:feed_name, :payload, :content_type, :job_count, :bytes_uncompressed, :generated_at)
-            ON DUPLICATE KEY UPDATE
-                payload = VALUES(payload),
-                content_type = VALUES(content_type),
-                job_count = VALUES(job_count),
-                bytes_uncompressed = VALUES(bytes_uncompressed),
-                generated_at = VALUES(generated_at)
-            """
-        ),
-        {
-            "feed_name": feed_name,
-            "payload": payload,
-            "content_type": "application/xml",
-            "job_count": job_count,
-            "bytes_uncompressed": len(raw),
-            "generated_at": generated_at,
-        },
+    print(
+        f"  artifact {feed_name}: jobs={job_count} "
+        f"raw={len(raw)} gzip={len(payload)} compress={compresslevel}",
+        flush=True,
     )
-    dest_conn.commit()
+    # Allow up to 512MiB packets for this session (capped by server global).
+    try:
+        dest_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
+    except Exception as exc:  # noqa: BLE001 — best-effort; INSERT may still work
+        print(f"  artifact warn: could not raise max_allowed_packet: {exc}", flush=True)
+
+    stmt = text(
+        """
+        INSERT INTO feed_xml_artifact
+            (feed_name, payload, content_type, job_count, bytes_uncompressed, generated_at)
+        VALUES
+            (:feed_name, :payload, :content_type, :job_count, :bytes_uncompressed, :generated_at)
+        ON DUPLICATE KEY UPDATE
+            payload = VALUES(payload),
+            content_type = VALUES(content_type),
+            job_count = VALUES(job_count),
+            bytes_uncompressed = VALUES(bytes_uncompressed),
+            generated_at = VALUES(generated_at)
+        """
+    )
+    params = {
+        "feed_name": feed_name,
+        "payload": payload,
+        "content_type": "application/xml",
+        "job_count": job_count,
+        "bytes_uncompressed": len(raw),
+        "generated_at": generated_at,
+    }
+    try:
+        dest_conn.execute(stmt, params)
+        dest_conn.commit()
+    except (OperationalError, DBAPIError, OSError) as exc:
+        if not _is_transient_db_error(exc) and "max_allowed_packet" not in str(exc).lower():
+            raise
+        print(
+            f"  artifact retry {feed_name} after {exc.__class__.__name__}: reconnect…",
+            flush=True,
+        )
+        try:
+            dest_conn.rollback()
+        except Exception:
+            pass
+        try:
+            dest_conn.invalidate()
+        except Exception:
+            pass
+        # Fresh connection from the same engine for the retry.
+        with dest_conn.engine.connect() as retry_conn:
+            try:
+                retry_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
+            except Exception:
+                pass
+            retry_conn.execute(stmt, params)
+            retry_conn.commit()
     return {
         "feed_name": feed_name,
         "job_count": job_count,

@@ -12,8 +12,28 @@ DEADLINE_SECONDS="${DEADLINE_SECONDS:-86400}"
 CRONJOB="linkedin-jooble-job-feed-pipeline"
 JOB_NAME="job-feed-manual-$(date +%Y%m%d-%H%M%S)"
 
+# Prefer PATH; fall back to common install locations (e.g. curl → ~/.local/bin).
 if ! command -v kubectl >/dev/null 2>&1; then
-  echo "kubectl non trovato. Installa kubectl e configura il contesto EKS (namespace ${NAMESPACE})." >&2
+  for candidate in "${HOME}/.local/bin/kubectl" /opt/homebrew/bin/kubectl /usr/local/bin/kubectl; do
+    if [[ -x "${candidate}" ]]; then
+      export PATH="$(dirname "${candidate}"):${PATH}"
+      break
+    fi
+  done
+fi
+if ! command -v kubectl >/dev/null 2>&1; then
+  echo "kubectl non trovato. Prova:" >&2
+  echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
+  echo "Poi EKS, es.:" >&2
+  echo "  aws eks update-kubeconfig --region eu-central-1 --name <cluster>" >&2
+  exit 1
+fi
+
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  echo "kubectl c'è ($(command -v kubectl)) ma nessun cluster raggiungibile (manca ~/.kube/config)." >&2
+  echo "Configura EKS e riprova, es.:" >&2
+  echo "  aws eks update-kubeconfig --region eu-central-1 --name <cluster>" >&2
+  kubectl config get-contexts 2>&1 || true
   exit 1
 fi
 

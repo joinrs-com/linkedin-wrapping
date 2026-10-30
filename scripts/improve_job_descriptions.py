@@ -143,10 +143,11 @@ def create_database_engine():
     if "sqlite" in url:
         connect_args = {"check_same_thread": False}
     elif "mysql" in url:
+        # Artifact UPSERT can push 50–80MB gzip blobs (jooble_usa); keep write open longer.
         connect_args = {
             "connect_timeout": 60,
-            "read_timeout": 600,
-            "write_timeout": 600,
+            "read_timeout": 1800,
+            "write_timeout": 1800,
         }
     engine = create_engine(
         url,
