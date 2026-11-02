@@ -4,29 +4,31 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 ## Features
 
-- GET `/wrapping/jooble` (+ `/us`, `/eu3`, `/row`) – Jooble, 4 bucket campagna; artefatto gzip; **no CPC**; `<countryCode>`
-- GET `/wrapping/talent` (+ `/us`, `/eu3`, `/row`) – stesso universo di Jooble; description Talent; **no CPC**
-- GET `/wrapping/adzuna` (+ `/us`, `/eu3`, `/row`) – stesso universo; **`<cpc>` obbligatorio** da priority; `country` ISO2 + `country_code`
-- GET `/wrapping/jooble/abroad` – **deprecato** (usa `/us` `/eu3` `/row`); artifact = usa∪eu3∪row
+- GET `/wrapping/jooble` (+ `/it`, `/it5`, `/es`, `/us/1`…`/us/5`, `/uk`, `/fr`, `/de`, `/eu`, `/americas`, `/asia`, `/row`) – Jooble, 15 feed; artefatto gzip in MySQL; **no CPC**; `<countryCode>`
+- GET `/wrapping/talent` / `/adzuna` — stessi 15 path di Jooble (Adzuna con **`<cpc>`**)
+- GET `/wrapping/jooble/abroad` — **deprecato** (usa `/jooble/us/1`…`/5`)
 - GET `/wrapping/whatjobs` / `hirematic` / `jobrapido` – invariati
 - Database migrations (`lw`), Helm, CI/CD, pytest
 
 ## Sponsorship feed XML
 
-Quattro **bucket fissi** (explode città + country; tutte priority/product; blacklist `1179402`):
+**15 feed** (explode città + country; tutte priority/product; blacklist `1179402`), description **intere**, gzip in MySQL `feed_xml_artifact`:
 
-| Bucket | Paesi | Path (Jooble / Talent / Adzuna) |
+| Feed | Contenuto | Path (es. Jooble) |
 | --- | --- | --- |
-| `ita_esp` | ITA ∪ ESP | `/wrapping/jooble`, `/talent`, `/adzuna` |
-| `usa` | USA | `…/us` |
-| `eu3` | FRA ∪ GBR ∪ DEU | `…/eu3` |
-| `row` | resto del mondo | `…/row` |
+| `it` | ITA priority 1–4 | `/wrapping/jooble`, `/jooble/it` |
+| `it5` | ITA priority 5 | `/jooble/it5` |
+| `es` | ESP | `/jooble/es` |
+| `usa_1`…`usa_5` | USA shard | `/jooble/us/1`…`/5` |
+| `uk` / `fr` / `de` | GBR / FRA / DEU | `/jooble/uk` … |
+| `eu` | resto Europa + PRT + BEL | `/jooble/eu` |
+| `americas` | CAN + BRA + LATAM | `/jooble/americas` |
+| `asia` | Asia principale | `/jooble/asia` |
+| `row` | resto mondo | `/jooble/row` |
 
-Tabelle: **`jooble_job_feed`** (Jooble+Talent) e **`adzuna_job_feed`**, colonna `bucket` + `country_code`. XML gzip in `feed_xml_artifact` (chiavi `jooble_ita_esp`, `talent_usa`, … + alias legacy `jooble`/`talent`/`adzuna`).
+Colonna `bucket` = feed key. Stesso schema per Talent e Adzuna.
 
-Vincoli piattaforma: Jooble/Talent **senza** `<cpc>`; Adzuna **con** CPC (P1=0.08 … P5=0). `priority` e `countryCode`/`country` per filtri campagna.
-
-**Description:** body only + HTML normalize in pipeline (no OpenAI). Verifica volumi: `python scripts/count_feed_buckets.py` (VPN). Smoke: `bash scripts/smoke_feed_endpoints.sh`. Migrazione: `alembic upgrade head` (fino a `0023`).
+Vincoli: Jooble/Talent **senza** `<cpc>`; Adzuna **con** CPC. Smoke: `bash scripts/smoke_feed_endpoints.sh`.
 
 ## Setup
 

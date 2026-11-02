@@ -256,13 +256,20 @@ class AdzunaJobFeed(SQLModel, table=True):
 
 
 class FeedXmlArtifact(SQLModel, table=True):
-    """Maps `lw.feed_xml_artifact`; gzip XML pre-built by the job-feed pipeline."""
+    """Maps `lw.feed_xml_artifact`; gzip XML pre-built by the job-feed pipeline.
+
+    Campaign feeds store gzip on S3/filesystem (`storage_uri`); `payload` may be NULL.
+    """
 
     __tablename__ = "feed_xml_artifact"
     __table_args__ = _resolve_schema()
 
     feed_name: str = Field(primary_key=True, max_length=64)
-    payload: bytes = Field(sa_column=Column("payload", LargeBinary, nullable=False))
+    payload: bytes | None = Field(default=None, sa_column=Column("payload", LargeBinary, nullable=True))
+    storage_uri: str | None = Field(
+        default=None,
+        sa_column=Column("storage_uri", String(512), nullable=True),
+    )
     content_type: str = Field(
         default="application/xml",
         sa_column=Column("content_type", String(64), nullable=False),
@@ -271,6 +278,10 @@ class FeedXmlArtifact(SQLModel, table=True):
     bytes_uncompressed: int = Field(
         default=0,
         sa_column=Column("bytes_uncompressed", BigInteger, nullable=False),
+    )
+    bytes_gzip: int = Field(
+        default=0,
+        sa_column=Column("bytes_gzip", BigInteger, nullable=False),
     )
     generated_at: datetime = Field(sa_column=Column("generated_at", DateTime, nullable=False))
 

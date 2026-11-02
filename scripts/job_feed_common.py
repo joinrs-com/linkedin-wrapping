@@ -1037,13 +1037,14 @@ def upsert_feed_xml_artifact(
     xml_text: str,
     job_count: int,
 ) -> dict[str, Any]:
-    """Gzip XML and UPSERT into lw.feed_xml_artifact (or default schema).
+    """Gzip full XML and store outside MySQL when FEED_XML_S3_BUCKET/DIR is set.
 
-    Large campaign feeds (e.g. jooble_usa ~100k jobs) produce 100MB+ gzip blobs;
-    raise session max_allowed_packet and use stronger compression before INSERT.
+    Campaign catalogs with full descriptions exceed max_allowed_packet (~64MiB);
+    put gzip on S3/filesystem and UPSERT metadata (payload NULL) into feed_xml_artifact.
     """
+    from utils.feed_xml_storage import external_storage_configured, put_gzip
+
     raw = xml_text.encode("utf-8")
-    # Stronger gzip for oversized catalogs (USA/row); level 6 is fine for small feeds.
     compresslevel = 9 if len(raw) >= 50_000_000 else 6
     payload = gzip.compress(raw, compresslevel=compresslevel)
     generated_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1052,38 +1053,58 @@ def upsert_feed_xml_artifact(
         f"raw={len(raw)} gzip={len(payload)} compress={compresslevel}",
         flush=True,
     )
-    # Allow up to 512MiB packets for this session (capped by server global).
-    try:
-        dest_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
-    except Exception as exc:  # noqa: BLE001 — best-effort; INSERT may still work
-        print(f"  artifact warn: could not raise max_allowed_packet: {exc}", flush=True)
+
+    storage_uri: str | None = None
+    db_payload: bytes | None = payload
+    if external_storage_configured():
+        storage_uri = put_gzip(feed_name, payload)
+        db_payload = None
+        print(f"  artifact {feed_name}: stored at {storage_uri}", flush=True)
+    else:
+        print(
+            "  artifact warn: FEED_XML_S3_BUCKET/FEED_XML_STORAGE_DIR unset; "
+            "writing gzip into MySQL (may fail if > max_allowed_packet)",
+            flush=True,
+        )
+        try:
+            dest_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  artifact warn: could not raise max_allowed_packet: {exc}", flush=True)
 
     stmt = text(
         """
         INSERT INTO feed_xml_artifact
-            (feed_name, payload, content_type, job_count, bytes_uncompressed, generated_at)
+            (feed_name, payload, storage_uri, content_type, job_count,
+             bytes_uncompressed, bytes_gzip, generated_at)
         VALUES
-            (:feed_name, :payload, :content_type, :job_count, :bytes_uncompressed, :generated_at)
+            (:feed_name, :payload, :storage_uri, :content_type, :job_count,
+             :bytes_uncompressed, :bytes_gzip, :generated_at)
         ON DUPLICATE KEY UPDATE
             payload = VALUES(payload),
+            storage_uri = VALUES(storage_uri),
             content_type = VALUES(content_type),
             job_count = VALUES(job_count),
             bytes_uncompressed = VALUES(bytes_uncompressed),
+            bytes_gzip = VALUES(bytes_gzip),
             generated_at = VALUES(generated_at)
         """
     )
     params = {
         "feed_name": feed_name,
-        "payload": payload,
+        "payload": db_payload,
+        "storage_uri": storage_uri,
         "content_type": "application/xml",
         "job_count": job_count,
         "bytes_uncompressed": len(raw),
+        "bytes_gzip": len(payload),
         "generated_at": generated_at,
     }
     try:
         dest_conn.execute(stmt, params)
         dest_conn.commit()
     except (OperationalError, DBAPIError, OSError) as exc:
+        if storage_uri is not None:
+            raise
         if not _is_transient_db_error(exc) and "max_allowed_packet" not in str(exc).lower():
             raise
         print(
@@ -1098,7 +1119,6 @@ def upsert_feed_xml_artifact(
             dest_conn.invalidate()
         except Exception:
             pass
-        # Fresh connection from the same engine for the retry.
         with dest_conn.engine.connect() as retry_conn:
             try:
                 retry_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
@@ -1111,5 +1131,31 @@ def upsert_feed_xml_artifact(
         "job_count": job_count,
         "bytes_uncompressed": len(raw),
         "bytes_gzip": len(payload),
+        "storage_uri": storage_uri,
         "generated_at": generated_at.isoformat(),
     }
+
+
+def load_feed_xml_gzip(dest_conn: Connection, feed_name: str) -> tuple[bytes, int]:
+    """Load artifact gzip + job_count from storage_uri or MySQL payload."""
+    from utils.feed_xml_storage import get_gzip
+
+    row = dest_conn.execute(
+        text(
+            """
+            SELECT payload, storage_uri, job_count
+            FROM feed_xml_artifact WHERE feed_name = :n
+            """
+        ),
+        {"n": feed_name},
+    ).mappings().first()
+    if row is None:
+        raise RuntimeError(f"missing feed_xml_artifact {feed_name}")
+    job_count = int(row["job_count"] or 0)
+    uri = row.get("storage_uri")
+    if uri:
+        return get_gzip(str(uri)), job_count
+    payload = row.get("payload")
+    if payload is None:
+        raise RuntimeError(f"feed_xml_artifact {feed_name} has neither storage_uri nor payload")
+    return bytes(payload), job_count

@@ -28,6 +28,9 @@ from api.platforms.talent import normalize_description_for_talent
 def _response_from_artifact(session: Session, feed_name: str) -> StreamingResponse | None:
     """Serve pre-generated gzip XML if the pipeline artifact exists.
 
+    Prefer S3/filesystem via ``storage_uri`` (full-description campaign feeds);
+    fall back to MySQL ``payload`` for legacy/small rows.
+
     Missing table / DB errors → None so endpoints keep the live fallback
     (e.g. before alembic 0022 has been applied).
     """
@@ -41,16 +44,35 @@ def _response_from_artifact(session: Session, feed_name: str) -> StreamingRespon
         except Exception:
             pass
         return None
-    if artifact is None or not artifact.payload:
+    if artifact is None:
         return None
+
+    storage_uri = getattr(artifact, "storage_uri", None) or None
+    payload = artifact.payload
+    if not storage_uri and not payload:
+        return None
+
     headers = {
         "Content-Encoding": "gzip",
         "Content-Type": "application/xml; charset=utf-8",
         "X-Feed-Job-Count": str(artifact.job_count),
         "X-Feed-Generated-At": artifact.generated_at.isoformat() if artifact.generated_at else "",
     }
+    bytes_gzip = int(getattr(artifact, "bytes_gzip", 0) or 0)
+    if bytes_gzip > 0:
+        headers["Content-Length"] = str(bytes_gzip)
+
+    if storage_uri:
+        from utils.feed_xml_storage import iter_gzip
+
+        return StreamingResponse(
+            iter_gzip(str(storage_uri)),
+            media_type="application/xml; charset=utf-8",
+            headers=headers,
+        )
+
     return StreamingResponse(
-        BytesIO(artifact.payload),
+        BytesIO(payload),
         media_type="application/xml; charset=utf-8",
         headers=headers,
     )
@@ -298,7 +320,7 @@ def generate_jobrapido_xml(rows: list) -> str:
 
 
 def _truncate_description(raw: str, max_chars: int | None) -> str:
-    """Soft-trim long HTML bodies so huge campaign feeds fit in MySQL LONGBLOB packets."""
+    """Optional description length cap (pipeline artifacts use full text via S3)."""
     if not max_chars or max_chars <= 0 or len(raw) <= max_chars:
         return raw
     return raw[:max_chars]
@@ -326,7 +348,7 @@ def generate_wrapping_xml(
     - If include_countries is true, outputs <countries> after <location> (Jooble abroad feed only).
     - If include_country_code is true, outputs <countryCode> (campaign filters; no CPC on Jooble/Talent).
     - description_sanitizer: optional callable applied to each description before CDATA (Talent.com).
-    - max_description_chars: optional soft trim for oversized campaign feeds (artifact upload).
+    - max_description_chars: optional truncation (unused by the S3 artifact pipeline).
     """
     # Use max last_build_date from job postings if available, otherwise generate current time
     last_build_dates = [job.last_build_date for job in job_postings if getattr(job, "last_build_date", None) is not None]
@@ -428,85 +450,153 @@ def _jooble_talent_live_xml(
     )
 
 
+def _feed_response(
+    session: Session,
+    *,
+    platform: str,
+    feed: str,
+    talent: bool = False,
+    adzuna: bool = False,
+) -> Response:
+    """Serve artifact ``{platform}_{feed}`` or live XML for that feed key."""
+    cached = _response_from_artifact(session, f"{platform}_{feed}")
+    if cached is not None:
+        return cached
+    if adzuna:
+        rows = get_adzuna_job_feed_rows(session, bucket=feed)
+        return Response(
+            content=generate_adzuna_xml(rows).encode("utf-8"),
+            media_type="application/xml; charset=utf-8",
+        )
+    xml_content = _jooble_talent_live_xml(session, bucket=feed, talent=talent)
+    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+
+
 async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble: ITA+ESP bucket (artifact key jooble / jooble_ita_esp)."""
+    """GET /wrapping/jooble: Italy priority 1–4 (alias of /jooble/it)."""
     cached = _response_from_artifact(session, "jooble")
     if cached is None:
-        cached = _response_from_artifact(session, "jooble_ita_esp")
+        cached = _response_from_artifact(session, "jooble_it")
     if cached is not None:
         return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="ita_esp", talent=False)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+    return _feed_response(session, platform="jooble", feed="it", talent=False)
 
 
-async def get_wrapping_jooble_us(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble/us: USA bucket."""
-    cached = _response_from_artifact(session, "jooble_usa")
-    if cached is not None:
-        return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="usa", talent=False)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+async def get_wrapping_jooble_it(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="it")
 
 
-async def get_wrapping_jooble_eu3(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble/eu3: FRA+GBR+DEU bucket."""
-    cached = _response_from_artifact(session, "jooble_eu3")
-    if cached is not None:
-        return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="eu3", talent=False)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+async def get_wrapping_jooble_it5(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="it5")
+
+
+async def get_wrapping_jooble_es(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="es")
+
+
+async def get_wrapping_jooble_us_shard(
+    shard: int, session: Session = Depends(get_session)
+) -> Response:
+    """GET /wrapping/jooble/us/{1-5}: USA job_posting_id shard."""
+    if shard < 1 or shard > 5:
+        return Response(content=b"USA shard must be 1..5", status_code=404)
+    return _feed_response(session, platform="jooble", feed=f"usa_{shard}")
+
+
+async def get_wrapping_jooble_uk(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="uk")
+
+
+async def get_wrapping_jooble_fr(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="fr")
+
+
+async def get_wrapping_jooble_de(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="de")
+
+
+async def get_wrapping_jooble_eu(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="eu")
+
+
+async def get_wrapping_jooble_americas(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="americas")
+
+
+async def get_wrapping_jooble_asia(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="jooble", feed="asia")
 
 
 async def get_wrapping_jooble_row(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble/row: rest-of-world bucket."""
-    cached = _response_from_artifact(session, "jooble_row")
-    if cached is not None:
-        return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="row", talent=False)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+    return _feed_response(session, platform="jooble", feed="row")
 
 
 async def get_wrapping_talent(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/talent: ITA+ESP bucket."""
+    """GET /wrapping/talent: Italy priority 1–4."""
     cached = _response_from_artifact(session, "talent")
     if cached is None:
-        cached = _response_from_artifact(session, "talent_ita_esp")
+        cached = _response_from_artifact(session, "talent_it")
     if cached is not None:
         return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="ita_esp", talent=True)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+    return _feed_response(session, platform="talent", feed="it", talent=True)
 
 
-async def get_wrapping_talent_us(session: Session = Depends(get_session)) -> Response:
-    cached = _response_from_artifact(session, "talent_usa")
-    if cached is not None:
-        return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="usa", talent=True)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+async def get_wrapping_talent_it(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="it", talent=True)
 
 
-async def get_wrapping_talent_eu3(session: Session = Depends(get_session)) -> Response:
-    cached = _response_from_artifact(session, "talent_eu3")
-    if cached is not None:
-        return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="eu3", talent=True)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+async def get_wrapping_talent_it5(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="it5", talent=True)
+
+
+async def get_wrapping_talent_es(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="es", talent=True)
+
+
+async def get_wrapping_talent_us_shard(
+    shard: int, session: Session = Depends(get_session)
+) -> Response:
+    if shard < 1 or shard > 5:
+        return Response(content=b"USA shard must be 1..5", status_code=404)
+    return _feed_response(session, platform="talent", feed=f"usa_{shard}", talent=True)
+
+
+async def get_wrapping_talent_uk(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="uk", talent=True)
+
+
+async def get_wrapping_talent_fr(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="fr", talent=True)
+
+
+async def get_wrapping_talent_de(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="de", talent=True)
+
+
+async def get_wrapping_talent_eu(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="eu", talent=True)
+
+
+async def get_wrapping_talent_americas(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="americas", talent=True)
+
+
+async def get_wrapping_talent_asia(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="talent", feed="asia", talent=True)
 
 
 async def get_wrapping_talent_row(session: Session = Depends(get_session)) -> Response:
-    cached = _response_from_artifact(session, "talent_row")
-    if cached is not None:
-        return cached
-    xml_content = _jooble_talent_live_xml(session, bucket="row", talent=True)
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
+    return _feed_response(session, platform="talent", feed="row", talent=True)
 
 
 async def get_wrapping_jooble_abroad(session: Session = Depends(get_session)) -> Response:
-    """Deprecated: prefer /jooble/us, /eu3, /row. Artifact = usa∪eu3∪row."""
+    """Deprecated: use /jooble/us/1..5. Live fallback = all USA shards."""
     cached = _response_from_artifact(session, "jooble_abroad")
     if cached is not None:
         return cached
-    rows = get_jooble_job_feed_rows(session, buckets=["usa", "eu3", "row"])
+    rows = get_jooble_job_feed_rows(
+        session, buckets=[f"usa_{i}" for i in range(1, 6)]
+    )
     if not rows:
         rows = get_jooble_abroad_job_feed_rows(session)
     xml_content = generate_wrapping_xml(
@@ -542,50 +632,61 @@ async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Resp
 
 
 async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/adzuna: ITA+ESP bucket (CPC required)."""
+    """GET /wrapping/adzuna: Italy priority 1–4 (CPC required)."""
     cached = _response_from_artifact(session, "adzuna")
     if cached is None:
-        cached = _response_from_artifact(session, "adzuna_ita_esp")
+        cached = _response_from_artifact(session, "adzuna_it")
     if cached is not None:
         return cached
-    rows = get_adzuna_job_feed_rows(session, bucket="ita_esp")
-    return Response(
-        content=generate_adzuna_xml(rows).encode("utf-8"),
-        media_type="application/xml; charset=utf-8",
-    )
+    return _feed_response(session, platform="adzuna", feed="it", adzuna=True)
 
 
-async def get_wrapping_adzuna_us(session: Session = Depends(get_session)) -> Response:
-    cached = _response_from_artifact(session, "adzuna_usa")
-    if cached is not None:
-        return cached
-    rows = get_adzuna_job_feed_rows(session, bucket="usa")
-    return Response(
-        content=generate_adzuna_xml(rows).encode("utf-8"),
-        media_type="application/xml; charset=utf-8",
-    )
+async def get_wrapping_adzuna_it(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="it", adzuna=True)
 
 
-async def get_wrapping_adzuna_eu3(session: Session = Depends(get_session)) -> Response:
-    cached = _response_from_artifact(session, "adzuna_eu3")
-    if cached is not None:
-        return cached
-    rows = get_adzuna_job_feed_rows(session, bucket="eu3")
-    return Response(
-        content=generate_adzuna_xml(rows).encode("utf-8"),
-        media_type="application/xml; charset=utf-8",
-    )
+async def get_wrapping_adzuna_it5(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="it5", adzuna=True)
+
+
+async def get_wrapping_adzuna_es(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="es", adzuna=True)
+
+
+async def get_wrapping_adzuna_us_shard(
+    shard: int, session: Session = Depends(get_session)
+) -> Response:
+    if shard < 1 or shard > 5:
+        return Response(content=b"USA shard must be 1..5", status_code=404)
+    return _feed_response(session, platform="adzuna", feed=f"usa_{shard}", adzuna=True)
+
+
+async def get_wrapping_adzuna_uk(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="uk", adzuna=True)
+
+
+async def get_wrapping_adzuna_fr(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="fr", adzuna=True)
+
+
+async def get_wrapping_adzuna_de(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="de", adzuna=True)
+
+
+async def get_wrapping_adzuna_eu(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="eu", adzuna=True)
+
+
+async def get_wrapping_adzuna_americas(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="americas", adzuna=True)
+
+
+async def get_wrapping_adzuna_asia(session: Session = Depends(get_session)) -> Response:
+    return _feed_response(session, platform="adzuna", feed="asia", adzuna=True)
 
 
 async def get_wrapping_adzuna_row(session: Session = Depends(get_session)) -> Response:
-    cached = _response_from_artifact(session, "adzuna_row")
-    if cached is not None:
-        return cached
-    rows = get_adzuna_job_feed_rows(session, bucket="row")
-    return Response(
-        content=generate_adzuna_xml(rows).encode("utf-8"),
-        media_type="application/xml; charset=utf-8",
-    )
+    return _feed_response(session, platform="adzuna", feed="row", adzuna=True)
 
 
 async def get_wrapping_jobrapido(session: Session = Depends(get_session)) -> Response:

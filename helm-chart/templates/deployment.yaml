@@ -23,6 +23,12 @@ spec:
                 secretKeyRef:
                   key: database-url
                   name: database-url
+            {{- if .Values.feedXmlStorage.bucket }}
+            - name: FEED_XML_S3_BUCKET
+              value: {{ .Values.feedXmlStorage.bucket | quote }}
+            - name: FEED_XML_S3_PREFIX
+              value: {{ .Values.feedXmlStorage.prefix | default "feed-xml" | quote }}
+            {{- end }}
           ports:
             - containerPort: 3000
           resources:

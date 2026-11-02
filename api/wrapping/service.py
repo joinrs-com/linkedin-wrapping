@@ -37,20 +37,20 @@ def get_jooble_job_feed_rows(
     bucket: str | None = None,
     buckets: list[str] | None = None,
 ) -> List[JoobleJobFeed]:
-    """Rows from jooble_job_feed; optional campaign bucket filter.
+    """Rows from jooble_job_feed; optional campaign feed-key filter (``bucket`` column).
 
-    Legacy rows with NULL bucket are treated as ``ita_esp`` (pre-migration).
+    Legacy rows with NULL bucket are treated as ``it`` (Italy P1–4).
     """
     statement = select(JoobleJobFeed)
     if bucket is not None:
-        if bucket == "ita_esp":
+        if bucket == "it":
             statement = statement.where(
                 or_(JoobleJobFeed.bucket == bucket, JoobleJobFeed.bucket.is_(None))
             )
         else:
             statement = statement.where(JoobleJobFeed.bucket == bucket)
     elif buckets:
-        if "ita_esp" in buckets:
+        if "it" in buckets:
             statement = statement.where(
                 or_(JoobleJobFeed.bucket.in_(buckets), JoobleJobFeed.bucket.is_(None))
             )
@@ -65,7 +65,7 @@ def get_jooble_job_feed_rows(
 
 
 def get_jooble_abroad_job_feed_rows(session: Session) -> List[JoobleAbroadJobFeed]:
-    """Deprecated table; prefer jooble buckets usa|eu3|row. Kept for live fallback."""
+    """Deprecated table; prefer /jooble/us/1..5. Kept for live fallback."""
     statement = select(JoobleAbroadJobFeed)
     results = session.exec(statement)
     return list(results.all())
@@ -86,13 +86,13 @@ def get_adzuna_job_feed_rows(
     *,
     bucket: str | None = None,
 ) -> List[AdzunaJobFeed]:
-    """Rows from adzuna_job_feed; optional campaign bucket filter.
+    """Rows from adzuna_job_feed; optional campaign feed-key filter.
 
-    Legacy rows with NULL bucket are treated as ``ita_esp``.
+    Legacy rows with NULL bucket are treated as ``it``.
     """
     statement = select(AdzunaJobFeed)
     if bucket is not None:
-        if bucket == "ita_esp":
+        if bucket == "it":
             statement = statement.where(
                 or_(AdzunaJobFeed.bucket == bucket, AdzunaJobFeed.bucket.is_(None))
             )

@@ -19,6 +19,11 @@ image: 343417272737.dkr.ecr.eu-central-1.amazonaws.com/linkedin-wrapping-service
 database:
   DATABASE_URL: ""
 
+# Optional external blob store for feed gzip (unused: artifacts stay in MySQL).
+feedXmlStorage:
+  bucket: ""
+  prefix: "feed-xml"
+
 # Esegue nella VPC del cluster (RDS raggiungibile). Creare il secret OpenAI nel namespace:
 # kubectl create secret generic openai-api-key --from-literal=OPENAI_API_KEY=sk-... -n lw
 jobFeedPipeline:
@@ -35,10 +40,11 @@ jobFeedPipeline:
   resources:
     limits:
       cpu: "1"
-      memory: 4Gi
+      # Full-text XML for usa∪eu3∪row (abroad merge) peaks well above 4Gi.
+      memory: 8Gi
     requests:
       cpu: 100m
-      memory: 1Gi
+      memory: 2Gi
 
 
 ingress:
