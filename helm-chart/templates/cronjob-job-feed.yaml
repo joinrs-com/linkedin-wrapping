@@ -48,6 +48,12 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.jobFeedPipeline.openaiSecretName | quote }}
                       key: {{ .Values.jobFeedPipeline.openaiSecretKey | quote }}
+                {{- if .Values.feedXmlStorage.bucket }}
+                - name: FEED_XML_S3_BUCKET
+                  value: {{ .Values.feedXmlStorage.bucket | quote }}
+                - name: FEED_XML_S3_PREFIX
+                  value: {{ .Values.feedXmlStorage.prefix | default "feed-xml" | quote }}
+                {{- end }}
               resources:
                 limits:
                   cpu: {{ .Values.jobFeedPipeline.resources.limits.cpu | quote }}

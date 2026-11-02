@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import argparse
 import gc
-import gzip
 import json
 import os
-import re
 import sys
 import time
 import traceback
@@ -59,7 +57,7 @@ from api.wrapping.wrapping import (  # noqa: E402
     generate_adzuna_xml,
     generate_wrapping_xml,
 )
-from feed_buckets import BUCKETS, artifact_name, legacy_root_artifact_name  # noqa: E402
+from feed_buckets import FEEDS, artifact_name, legacy_root_artifact_name  # noqa: E402
 
 
 @dataclass
@@ -229,31 +227,14 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-# Soft trim descriptions when a single campaign artifact would exceed MySQL packet limits
-# (seen on jooble_usa ~118k jobs / ~890MB uncompressed / ~300MB gzip → connection reset).
-# Server max_allowed_packet observed at 64MiB — keep gzip under this.
-_ARTIFACT_LARGE_JOBS = 80_000
-_ARTIFACT_MAX_DESCRIPTION_CHARS = 1_500
-_ARTIFACT_RAW_SOFT_LIMIT = 200_000_000
-_ARTIFACT_GZIP_HARD_LIMIT = 60_000_000
-_DESC_CDATA_RE = re.compile(
-    r"(<description><!\[CDATA\[)(.*?)(\]\]></description>)",
-    re.DOTALL,
-)
-
-
-def _max_description_for_jobs(job_count: int) -> int | None:
-    return _ARTIFACT_MAX_DESCRIPTION_CHARS if job_count >= _ARTIFACT_LARGE_JOBS else None
-
-
 _FeedRowT = TypeVar("_FeedRowT", bound=SQLModel)
 _ARTIFACT_LOAD_CHUNK = 2_000
 
 
 def _bucket_where(model: type[SQLModel], bucket: str):
-    """Match campaign bucket; NULL/empty bucket columns fold into 'row'."""
-    if bucket == "row":
-        return or_(model.bucket == "row", model.bucket.is_(None), model.bucket == "")  # type: ignore[attr-defined]
+    """Match campaign feed key; NULL/empty fold into Italy P1–4 (``it``)."""
+    if bucket == "it":
+        return or_(model.bucket == "it", model.bucket.is_(None), model.bucket == "")  # type: ignore[attr-defined]
     return model.bucket == bucket  # type: ignore[attr-defined]
 
 
@@ -306,108 +287,6 @@ def _load_feed_bucket(
     return rows
 
 
-def _truncate_xml_descriptions(xml: str, max_chars: int) -> str:
-    """Shrink already-built <description><![CDATA[…]]> bodies (abroad merge path)."""
-
-    def _repl(match: re.Match[str]) -> str:
-        body = match.group(2)
-        if len(body) <= max_chars:
-            return match.group(0)
-        return f"{match.group(1)}{body[:max_chars]}{match.group(3)}"
-
-    return _DESC_CDATA_RE.sub(_repl, xml)
-
-
-def _extract_job_blocks(source_xml: str) -> str:
-    parts: list[str] = []
-    start = 0
-    while True:
-        i = source_xml.find("<job>", start)
-        if i < 0:
-            break
-        j = source_xml.find("</job>", i)
-        if j < 0:
-            break
-        parts.append(source_xml[i : j + len("</job>")])
-        start = j + len("</job>")
-    return "\n".join(parts)
-
-
-def _wrap_jooble_source_xml(job_blocks: str) -> str:
-    last_build = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        "<source>\n"
-        f" <lastBuildDate> {last_build} </lastBuildDate>\n"
-        f"{job_blocks}\n"
-        "</source>"
-    )
-
-
-def _upsert_abroad_from_bucket_artifacts(dest_conn, stats: dict[str, dict]) -> dict:
-    """Build jooble_abroad by merging jooble_{usa,eu3,row} payloads (no row reload).
-
-    Avoids a second multi-hour SELECT of ~340k rows; shrinks descriptions until gzip
-    fits under server max_allowed_packet (~64MiB).
-    """
-    bucket_names = [artifact_name("jooble", b) for b in ("usa", "eu3", "row")]
-    sources: list[str] = []
-    total_jobs = 0
-    for name in bucket_names:
-        row = dest_conn.execute(
-            text(
-                "SELECT payload, job_count FROM feed_xml_artifact WHERE feed_name = :n"
-            ),
-            {"n": name},
-        ).mappings().first()
-        if row is None:
-            raise RuntimeError(f"missing bucket artifact {name} for jooble_abroad merge")
-        xml = gzip.decompress(bytes(row["payload"])).decode("utf-8")
-        sources.append(xml)
-        total_jobs += int(row["job_count"] or 0)
-        print(
-            f"  abroad merge source {name}: jobs={row['job_count']} "
-            f"xml_bytes={len(xml)}",
-            flush=True,
-        )
-
-    max_desc = 500
-    while True:
-        print(
-            f"  soft-trim abroad merge descriptions to {max_desc} chars "
-            f"({total_jobs} jobs)",
-            flush=True,
-        )
-        job_blocks = "\n".join(
-            _extract_job_blocks(_truncate_xml_descriptions(xml, max_desc))
-            for xml in sources
-        )
-        xml_text = _wrap_jooble_source_xml(job_blocks)
-        raw_len = len(xml_text.encode("utf-8"))
-        gz_probe = len(gzip.compress(xml_text.encode("utf-8"), compresslevel=9))
-        if gz_probe > _ARTIFACT_GZIP_HARD_LIMIT and max_desc > 100:
-            next_desc = max(100, max_desc // 2)
-            print(
-                f"  artifact jooble_abroad: raw={raw_len} gzip~={gz_probe} still large; "
-                f"tightening trim {max_desc} → {next_desc}",
-                flush=True,
-            )
-            del xml_text, job_blocks
-            max_desc = next_desc
-            continue
-        try:
-            result = upsert_feed_xml_artifact(
-                dest_conn,
-                feed_name="jooble_abroad",
-                xml_text=xml_text,
-                job_count=total_jobs,
-            )
-            stats["jooble_abroad"] = result
-            return result
-        finally:
-            del xml_text, job_blocks
-
-
 def _upsert_xml_artifact(
     dest_conn,
     *,
@@ -416,44 +295,17 @@ def _upsert_xml_artifact(
     job_count: int,
     builder,
 ) -> dict:
-    """Generate XML (with adaptive soft-trim) and UPSERT; free the string ASAP."""
-    max_desc = _max_description_for_jobs(job_count)
-    while True:
-        if max_desc:
-            print(
-                f"  soft-trim descriptions to {max_desc} chars for {feed_name} "
-                f"({job_count} jobs)",
-                flush=True,
-            )
-        xml_text = builder(rows, max_desc)
-        raw_len = len(xml_text.encode("utf-8"))
-        gz_probe = len(gzip.compress(xml_text.encode("utf-8"), compresslevel=9))
-        needs_tighten = (
-            (
-                raw_len > _ARTIFACT_RAW_SOFT_LIMIT
-                and job_count >= _ARTIFACT_LARGE_JOBS
-            )
-            or gz_probe > _ARTIFACT_GZIP_HARD_LIMIT
-        ) and (max_desc is None or max_desc > 100)
-        if needs_tighten:
-            next_desc = 500 if max_desc is None else max(100, max_desc // 2)
-            print(
-                f"  artifact {feed_name}: raw={raw_len} gzip~={gz_probe} still large; "
-                f"tightening trim {max_desc} → {next_desc}",
-                flush=True,
-            )
-            del xml_text
-            max_desc = next_desc
-            continue
-        try:
-            return upsert_feed_xml_artifact(
-                dest_conn,
-                feed_name=feed_name,
-                xml_text=xml_text,
-                job_count=job_count,
-            )
-        finally:
-            del xml_text
+    """Generate full XML (no description trim) and UPSERT gzip into MySQL."""
+    xml_text = builder(rows)
+    try:
+        return upsert_feed_xml_artifact(
+            dest_conn,
+            feed_name=feed_name,
+            xml_text=xml_text,
+            job_count=job_count,
+        )
+    finally:
+        del xml_text
 
 
 def _artifact_platforms_for_feeds(feed_names: list[str] | None) -> set[str] | None:
@@ -477,16 +329,15 @@ def _generate_feed_xml_artifacts(
     *,
     platforms: set[str] | None = None,
 ) -> dict[str, dict]:
-    """Build gzip XML per platform × campaign bucket (+ legacy root aliases).
+    """Build gzip XML per platform × feed key (+ root aliases → Italy ``it``).
 
-    Loads one bucket at a time (chunked) so ~345k-row full-table SELECTs do not
-    hit MySQL lost-connection mid-result.
+    Loads one feed at a time (chunked). Full descriptions; MySQL LONGBLOB payload.
     platforms: optional subset of {"jooble","talent","adzuna"}; None = all.
     """
     want = platforms or {"jooble", "talent", "adzuna"}
     stats: dict[str, dict] = {}
 
-    def _jooble_xml(rows: list, max_desc: int | None) -> str:
+    def _jooble_xml(rows: list) -> str:
         return generate_wrapping_xml(
             rows,
             apply_url_mode="jooble",
@@ -494,10 +345,9 @@ def _generate_feed_xml_artifacts(
             include_priority=True,
             include_employers_id=True,
             include_country_code=True,
-            max_description_chars=max_desc,
         )
 
-    def _talent_xml(rows: list, max_desc: int | None) -> str:
+    def _talent_xml(rows: list) -> str:
         return generate_wrapping_xml(
             rows,
             apply_url_mode="jooble",
@@ -506,29 +356,28 @@ def _generate_feed_xml_artifacts(
             include_employers_id=True,
             include_country_code=True,
             description_sanitizer=normalize_description_for_talent,
-            max_description_chars=max_desc,
         )
 
-    def _adzuna_xml(rows: list, max_desc: int | None) -> str:
-        return generate_adzuna_xml(rows, max_description_chars=max_desc)
+    def _adzuna_xml(rows: list) -> str:
+        return generate_adzuna_xml(rows)
 
     with dest_engine.connect() as dest_conn:
-        for bucket in BUCKETS:
-            print(f"\n-- artifacts for bucket={bucket} --", flush=True)
+        for feed in FEEDS:
+            print(f"\n-- artifacts for feed={feed} --", flush=True)
             if "jooble" in want or "talent" in want:
-                j_rows = _load_feed_bucket(dest_engine, JoobleJobFeed, bucket)
+                j_rows = _load_feed_bucket(dest_engine, JoobleJobFeed, feed)
                 if "jooble" in want:
-                    stats[artifact_name("jooble", bucket)] = _upsert_xml_artifact(
+                    stats[artifact_name("jooble", feed)] = _upsert_xml_artifact(
                         dest_conn,
-                        feed_name=artifact_name("jooble", bucket),
+                        feed_name=artifact_name("jooble", feed),
                         rows=j_rows,
                         job_count=len(j_rows),
                         builder=_jooble_xml,
                     )
                 if "talent" in want:
-                    stats[artifact_name("talent", bucket)] = _upsert_xml_artifact(
+                    stats[artifact_name("talent", feed)] = _upsert_xml_artifact(
                         dest_conn,
-                        feed_name=artifact_name("talent", bucket),
+                        feed_name=artifact_name("talent", feed),
                         rows=j_rows,
                         job_count=len(j_rows),
                         builder=_talent_xml,
@@ -537,10 +386,10 @@ def _generate_feed_xml_artifacts(
                 gc.collect()
 
             if "adzuna" in want:
-                a_rows = _load_feed_bucket(dest_engine, AdzunaJobFeed, bucket)
-                stats[artifact_name("adzuna", bucket)] = _upsert_xml_artifact(
+                a_rows = _load_feed_bucket(dest_engine, AdzunaJobFeed, feed)
+                stats[artifact_name("adzuna", feed)] = _upsert_xml_artifact(
                     dest_conn,
-                    feed_name=artifact_name("adzuna", bucket),
+                    feed_name=artifact_name("adzuna", feed),
                     rows=a_rows,
                     job_count=len(a_rows),
                     builder=_adzuna_xml,
@@ -548,27 +397,30 @@ def _generate_feed_xml_artifacts(
                 del a_rows
                 gc.collect()
 
-        # Compat: /wrapping/jooble|talent|adzuna still resolve artifact keys without suffix
+        # Compat: /wrapping/jooble|talent|adzuna → same payload as Italy P1–4 (``it``)
         for platform in ("jooble", "talent", "adzuna"):
             if platform not in want:
                 continue
-            src = artifact_name(platform, "ita_esp")
+            src = artifact_name(platform, "it")
             if src in stats:
                 legacy = legacy_root_artifact_name(platform)
-                # Re-use already-uploaded ita_esp payload via a lightweight SQL copy.
                 dest_conn.execute(
                     text(
                         """
                         INSERT INTO feed_xml_artifact
-                            (feed_name, payload, content_type, job_count, bytes_uncompressed, generated_at)
-                        SELECT :legacy, payload, content_type, job_count, bytes_uncompressed, generated_at
+                            (feed_name, payload, storage_uri, content_type, job_count,
+                             bytes_uncompressed, bytes_gzip, generated_at)
+                        SELECT :legacy, payload, storage_uri, content_type, job_count,
+                               bytes_uncompressed, bytes_gzip, generated_at
                         FROM feed_xml_artifact
                         WHERE feed_name = :src
                         ON DUPLICATE KEY UPDATE
                             payload = VALUES(payload),
+                            storage_uri = VALUES(storage_uri),
                             content_type = VALUES(content_type),
                             job_count = VALUES(job_count),
                             bytes_uncompressed = VALUES(bytes_uncompressed),
+                            bytes_gzip = VALUES(bytes_gzip),
                             generated_at = VALUES(generated_at)
                         """
                     ),
@@ -576,11 +428,6 @@ def _generate_feed_xml_artifacts(
                 )
                 dest_conn.commit()
                 stats[legacy] = {**stats[src], "feed_name": legacy}
-
-        # Compat: /wrapping/jooble/abroad → usa∪eu3∪row (deprecated; prefer /us /eu3 /row)
-        if "jooble" in want:
-            print("\n-- artifacts for jooble_abroad (usa∪eu3∪row merge) --", flush=True)
-            _upsert_abroad_from_bucket_artifacts(dest_conn, stats)
     return stats
 
 

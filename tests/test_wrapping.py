@@ -368,6 +368,7 @@ def test_wrapping_serves_gzip_artifact(client: TestClient):
                 content_type="application/xml",
                 job_count=1,
                 bytes_uncompressed=len(xml.encode("utf-8")),
+                bytes_gzip=len(payload),
                 generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             )
         )
@@ -382,6 +383,49 @@ def test_wrapping_serves_gzip_artifact(client: TestClient):
     if body[:2] == b"\x1f\x8b":
         body = gzip.decompress(body)
     assert b"artifact-1" in body
+
+
+def test_wrapping_serves_storage_uri_artifact(client: TestClient, tmp_path, monkeypatch):
+    """Campaign feeds with storage_uri stream gzip from filesystem/S3, not MySQL payload."""
+    monkeypatch.setenv("FEED_XML_STORAGE_DIR", str(tmp_path))
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<source>\n"
+        " <lastBuildDate> Wed, 02 Nov 2026 00:00:00 GMT </lastBuildDate>\n"
+        " <job><partnerJobId><![CDATA[s3-artifact-1]]></partnerJobId>"
+        "<description><![CDATA[full description text]]></description></job>\n"
+        "</source>"
+    )
+    from utils.feed_xml_storage import put_gzip
+
+    raw = xml.encode("utf-8")
+    gz = gzip.compress(raw)
+    uri = put_gzip("jooble_usa_1", gz)
+    get_sess = list(app.dependency_overrides.values())[0]
+    with next(get_sess()) as s:  # type: ignore
+        s.add(
+            models.FeedXmlArtifact(
+                feed_name="jooble_usa_1",
+                payload=None,
+                storage_uri=uri,
+                content_type="application/xml",
+                job_count=1,
+                bytes_uncompressed=len(raw),
+                bytes_gzip=len(gz),
+                generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+        )
+        s.commit()
+
+    r = client.get("/wrapping/jooble/us/1")
+    assert r.status_code == 200
+    assert r.headers.get("content-encoding") == "gzip"
+    assert r.headers.get("x-feed-job-count") == "1"
+    body = r.content
+    if body[:2] == b"\x1f\x8b":
+        body = gzip.decompress(body)
+    assert b"s3-artifact-1" in body
+    assert b"full description text" in body
 
 
 def test_wrapping_jooble_abroad_empty(client: TestClient):

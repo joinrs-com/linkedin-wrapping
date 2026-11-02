@@ -279,9 +279,19 @@ SELECT
     lr.country_code AS country_code,
 
     CASE
-        WHEN lr.country_code IN ('ITA', 'ESP') THEN 'ita_esp'
-        WHEN lr.country_code = 'USA' THEN 'usa'
-        WHEN lr.country_code IN ('FRA', 'GBR', 'DEU') THEN 'eu3'
+        WHEN lr.country_code = 'ITA' AND COALESCE(n.priority, 5) IN (1, 2, 3, 4) THEN 'it'
+        WHEN lr.country_code = 'ITA' THEN 'it5'
+        WHEN lr.country_code = 'ESP' THEN 'es'
+        WHEN lr.country_code = 'USA' THEN CONCAT(
+            'usa_',
+            (CRC32(CAST(n.id AS CHAR)) MOD 5) + 1
+        )
+        WHEN lr.country_code = 'GBR' THEN 'uk'
+        WHEN lr.country_code = 'FRA' THEN 'fr'
+        WHEN lr.country_code = 'DEU' THEN 'de'
+        WHEN lr.country_code IN ('ABW', 'AIA', 'ARG', 'ATG', 'BES', 'BHS', 'BLZ', 'BOL', 'BRA', 'BRB', 'CAN', 'CHL', 'COL', 'CRI', 'CUB', 'CUW', 'CYM', 'DMA', 'DOM', 'ECU', 'GLP', 'GRD', 'GTM', 'GUF', 'GUY', 'HND', 'HTI', 'JAM', 'KNA', 'LCA', 'MEX', 'MSR', 'MTQ', 'NIC', 'PAN', 'PER', 'PRI', 'PRY', 'SLV', 'SUR', 'SXM', 'TCA', 'TTO', 'URY', 'VCT', 'VEN', 'VGB') THEN 'americas'
+        WHEN lr.country_code IN ('BGD', 'BRN', 'BTN', 'CHN', 'HKG', 'IDN', 'IND', 'JPN', 'KHM', 'KOR', 'LAO', 'LKA', 'MAC', 'MDV', 'MMR', 'MNG', 'MYS', 'NPL', 'PAK', 'PHL', 'SGP', 'THA', 'TLS', 'TWN', 'VNM') THEN 'asia'
+        WHEN lr.country_code IN ('ALA', 'ALB', 'AND', 'AUT', 'BEL', 'BGR', 'BIH', 'CHE', 'CYP', 'CZE', 'DNK', 'EST', 'FIN', 'FRO', 'GGY', 'GIB', 'GRC', 'GRL', 'HRV', 'HUN', 'IMN', 'IRL', 'ISL', 'JEY', 'LIE', 'LTU', 'LUX', 'LVA', 'MCO', 'MDA', 'MKD', 'MLT', 'MNE', 'NLD', 'NOR', 'POL', 'PRT', 'ROU', 'RUS', 'SMR', 'SRB', 'SUI', 'SVK', 'SVN', 'SWE', 'UKR', 'VAT', 'XK') THEN 'eu'
         ELSE 'row'
     END AS bucket
 

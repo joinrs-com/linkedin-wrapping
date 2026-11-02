@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Count exploded location rows per campaign bucket (VPN / production source).
+"""Count exploded location rows per campaign feed key (VPN / production source).
 
     set -a && source .env && set +a
     .venv/bin/python scripts/count_feed_buckets.py
@@ -17,7 +17,7 @@ root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root / "scripts"))
 load_dotenv(root / ".env", override=True)
 
-from feed_buckets import BUCKETS, bucket_for_country  # noqa: E402
+from feed_buckets import FEEDS, feed_for_row  # noqa: E402
 from job_feed_common import apply_job_feed_db_qualifiers  # noqa: E402
 
 SQL = apply_job_feed_db_qualifiers(
@@ -79,23 +79,28 @@ def main() -> None:
     if not url:
         raise SystemExit("JOB_FEED_SOURCE_DATABASE_URL required")
     eng = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 30})
-    bucket_rows: dict[str, int] = {b: 0 for b in BUCKETS}
-    bucket_jobs: dict[str, set[int]] = {b: set() for b in BUCKETS}
+    feed_rows: dict[str, int] = {f: 0 for f in FEEDS}
     total_rows = 0
     countries = 0
     with eng.connect() as conn:
         for country_code, rows_n, jobs_n in conn.execute(text(SQL)):
             countries += 1
             total_rows += int(rows_n)
-            b = bucket_for_country(str(country_code) if country_code is not None else "")
-            bucket_rows[b] += int(rows_n)
-            print(f"  {country_code}: rows={rows_n} jobs={jobs_n} → {b}")
+            cc = str(country_code) if country_code is not None else ""
+            # USA shards need job_posting_id; aggregate under usa_1 for this country rollup.
+            feed = feed_for_row(cc, priority=5, job_posting_id=0)
+            if cc == "USA":
+                feed = "usa_*"
+                feed_rows.setdefault("usa_*", 0)
+            feed_rows[feed] = feed_rows.get(feed, 0) + int(rows_n)
+            print(f"  {country_code}: rows={rows_n} jobs={jobs_n} → {feed}")
     print("---")
     print(f"countries={countries} explode_rows={total_rows}")
-    for b in BUCKETS:
-        print(f"bucket {b}: rows={bucket_rows[b]}")
-    # sanity vs user baseline ~342780
-    print(f"(baseline explode_rows≈342780)")
+    for f in list(FEEDS) + (["usa_*"] if "usa_*" in feed_rows else []):
+        if f.startswith("usa_") and f != "usa_*":
+            continue
+        print(f"feed {f}: rows={feed_rows.get(f, 0)}")
+    print("(USA shards usa_1..5 assigned at sync via CRC32(job_posting_id))")
 
 
 if __name__ == "__main__":

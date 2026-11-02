@@ -29,18 +29,20 @@ check() {
   echo
 }
 
-# Headers-only friendly: still downloads; expect 200 + gzip + X-Feed-Job-Count
-check talent 1
-check talent/us 1
-check talent/eu3 1
-check talent/row 1
-check jooble 1
-check jooble/us 1
-check jooble/eu3 1
-check jooble/row 1
-check adzuna 1
-check adzuna/us 1
-check adzuna/eu3 1
-check adzuna/row 1
-check jooble/abroad 1
+for platform in jooble talent adzuna; do
+  check "${platform}" 1
+  check "${platform}/it" 1
+  check "${platform}/it5" 1
+  check "${platform}/es" 1
+  for s in 1 2 3 4 5; do
+    check "${platform}/us/${s}" 1
+  done
+  check "${platform}/uk" 1
+  check "${platform}/fr" 1
+  check "${platform}/de" 1
+  check "${platform}/eu" 1
+  check "${platform}/americas" 1
+  check "${platform}/asia" 1
+  check "${platform}/row" 1
+done
 echo "DONE"
