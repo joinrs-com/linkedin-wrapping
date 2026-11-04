@@ -6,21 +6,10 @@ from api.wrapping.models import (
     AdzunaJobFeed,
     FeedXmlArtifact,
     HirematicJobFeed,
-    JobPostings,
     JobrapidoJobFeed,
     JoobleJobFeed,
     WhatjobsJobFeed,
 )
-
-
-def get_available_job_postings(session: Session) -> List[JobPostings]:
-    """
-    Query job postings (legacy LinkedIn table; no longer exposed via XML).
-    Currently returns all job postings, can be extended with filtering logic.
-    """
-    statement = select(JobPostings)
-    results = session.exec(statement)
-    return list(results.all())
 
 
 def get_hirematic_job_feed_rows(session: Session) -> List[HirematicJobFeed]:

@@ -180,11 +180,6 @@ def _is_transient_db_error(exc: BaseException) -> bool:
     )
 
 
-def load_enriched_descriptions(conn: Connection) -> dict[int, str]:
-    rows = conn.execute(text("SELECT job_id, description FROM job_description_enriched")).fetchall()
-    return {int(r[0]): r[1] for r in rows}
-
-
 def _normalize_id(value: Any, *, as_string: bool) -> str | int:
     if value is None:
         raise ValueError("id nullo nella riga sorgente")

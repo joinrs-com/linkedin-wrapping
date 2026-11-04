@@ -79,7 +79,7 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 - `scripts/count_feed_buckets.py`, `scripts/count_explode_feeds.py`: conteggi diagnostici.
 - `scripts/trigger_job_feed_k8s.sh`: avvio manuale della pipeline nel cluster.
 
-Il modulo di classificazione blue/white collar `enrichment` e la vecchia pipeline di riscrittura OpenAI sono stati rimossi. Le migrazioni Alembic e i modelli delle tabelle storiche restano per compatibilità con i database esistenti; la pulizia del codice non elimina tabelle o dati. I campi storici OpenAI nei report rimangono a zero.
+Il modulo di classificazione blue/white collar `enrichment` e la vecchia pipeline di riscrittura OpenAI sono stati rimossi. Le migrazioni Alembic storiche restano nella catena. Le migrazioni 0025 e 0026 rimuovono le tabelle dismesse, dopo backup verificato; i relativi modelli non sono più caricati. I campi storici OpenAI nei report rimangono a zero.
 
 ## API Endpoints
 
@@ -271,15 +271,14 @@ Test HTTP endpoints using `test_wrapping.http` file.
 
 ## Database Schema
 
-The service uses the `lw` schema for job postings:
+Lo schema `lw` contiene le tabelle attive:
 
-- `job_postings` table:
-  - `id` (BigInteger, Primary Key)
-  - `position` (String)
-  - `created_at` (Timestamp)
-  - `updated_at` (Timestamp)
+- `jooble_job_feed` (condivisa da Jooble e Talent), `adzuna_job_feed`, `whatjobs_job_feed`, `hirematic_job_feed`, `jobrapido_job_feed`.
+- `feed_xml_artifact`: XML gzip e metadati.
+- `job_feed_pipeline_run`: report delle esecuzioni.
+- `lw_alembic_version`: versione delle migrazioni.
 
-Se in passato avevi creato la tabella `job_jooble_mapping`, la migrazione Alembic `0007_drop_job_jooble_mapping` la rimuove: esegui `alembic upgrade head`. In alternativa puoi eliminarla manualmente dal database.
+La migrazione `0025_drop_jooble_abroad` elimina la vecchia tabella abroad. La migrazione `0026_drop_legacy_linkedin` elimina soltanto `lw.job_posting_pre`, `lw.job_postings` e `lw.job_description_enriched`. Prima dell’upgrade occorre un backup completo e verificato; il downgrade ricrea solo gli schemi vuoti. La sorgente attiva `job_postings.job_postings_1` appartiene al database di produzione e non viene eliminata.
 
 ## Deployment
 

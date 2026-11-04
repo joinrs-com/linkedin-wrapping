@@ -177,19 +177,11 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
     assert "<salary><![CDATA[25000 EUR]]></salary>" in r.text
 
 
-def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: TestClient):
-    """Jooble main feed uses jooble_job_feed only; job_postings rows are ignored."""
+def test_wrapping_jooble_works_without_legacy_tables(client: TestClient):
+    """Jooble works with only active models and no legacy LinkedIn tables."""
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
-        s.add(
-            models.JobPostings(
-                id=99,
-                position="Only LinkedIn",
-                created_at=_now,
-                updated_at=_now,
-            )
-        )
         s.add(
             models.JoobleJobFeed(
                 id="1-1",
@@ -205,7 +197,7 @@ def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: Tes
     r = client.get("/wrapping/jooble/it")
     assert r.status_code == 200
     assert "<![CDATA[Only Jooble]]>" in r.text
-    assert "Only LinkedIn" not in r.text
+    assert not {"job_postings", "job_posting_pre", "job_description_enriched"} & set(SQLModel.metadata.tables)
 
     r2 = client.get("/wrapping/")
     assert r2.status_code == 404
@@ -216,15 +208,6 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
-        s.add(
-            models.JobPostings(
-                id=1,
-                position="LinkedIn Job",
-                company="OldCompany",
-                created_at=_now,
-                updated_at=_now,
-            )
-        )
         s.add(
             models.JoobleJobFeed(
                 id="1-1",
@@ -577,18 +560,10 @@ def test_wrapping_whatjobs_omits_empty_optional_tags(client: TestClient):
     assert "<company_logo>" not in r.text
 
 
-def test_wrapping_whatjobs_reads_from_table_not_job_postings(client: TestClient):
+def test_wrapping_whatjobs_works_without_legacy_tables(client: TestClient):
     _now = datetime.now(timezone.utc)
     get_sess = list(app.dependency_overrides.values())[0]
     with next(get_sess()) as s:  # type: ignore
-        s.add(
-            models.JobPostings(
-                id=99,
-                position="Only LinkedIn",
-                created_at=_now,
-                updated_at=_now,
-            )
-        )
         s.add(
             models.WhatjobsJobFeed(
                 id=1,
@@ -608,6 +583,6 @@ def test_wrapping_whatjobs_reads_from_table_not_job_postings(client: TestClient)
     r = client.get("/wrapping/whatjobs")
     assert r.status_code == 200
     assert "<![CDATA[Only WhatJobs]]>" in r.text
-    assert "Only LinkedIn" not in r.text
+    assert not {"job_postings", "job_posting_pre", "job_description_enriched"} & set(SQLModel.metadata.tables)
 
 
