@@ -4,19 +4,19 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 ## Features
 
-- GET `/wrapping/jooble` (+ `/it`, `/it5`, `/es`, `/us/1`…`/us/5`, `/uk`, `/fr`, `/de`, `/eu`, `/americas`, `/asia`, `/row`) – Jooble, 15 feed; artefatto gzip in MySQL; **no CPC**; `<countryCode>`
-- GET `/wrapping/talent` / `/adzuna` — stessi 15 path di Jooble (Adzuna con **`<cpc>`**)
+- GET `/wrapping/jooble/it`, `/it5`, `/es`, `/us/1`…`/us/5`, `/uk`, `/fr`, `/de`, `/eu`, `/americas`, `/asia`, `/row` – Jooble, 15 feed; artefatto gzip in MySQL; **no CPC**; `<countryCode>`
+- GET `/wrapping/talent/…` / `/adzuna/…` — stessi 15 path di Jooble (Adzuna con **`<cpc>`**)
 - GET `/wrapping/jooble/abroad` — **deprecato** (usa `/jooble/us/1`…`/5`)
 - GET `/wrapping/whatjobs` / `hirematic` / `jobrapido` – invariati
 - Database migrations (`lw`), Helm, CI/CD, pytest
 
 ## Sponsorship feed XML
 
-**15 feed** (explode città + country; tutte priority/product; blacklist `1179402`), description **intere**, gzip in MySQL `feed_xml_artifact` (split così ogni artifact resta sotto `max_allowed_packet`):
+**15 feed** (explode città + country; tutte priority/product; blacklist `1179402`), description **intere**, gzip in MySQL `feed_xml_artifact` (split così ogni artifact resta sotto `max_allowed_packet`). Nessun alias root: usare `/it` e `/it5`.
 
 | Feed | Contenuto | Path (es. Jooble) |
 | --- | --- | --- |
-| `it` | ITA priority 1–4 | `/wrapping/jooble`, `/jooble/it` |
+| `it` | ITA priority 1–4 | `/jooble/it` |
 | `it5` | ITA priority 5 | `/jooble/it5` |
 | `es` | ESP | `/jooble/es` |
 | `usa_1`…`usa_5` | USA shard | `/jooble/us/1`…`/5` |
@@ -72,11 +72,11 @@ docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 
 ## API Endpoints
 
-### GET /wrapping/jooble
+### GET /wrapping/jooble/it
 
-Feed Jooble **principale** (e Talent.com su `/wrapping/talent`). Contenuto ITA+ESP da `lw.jooble_job_feed`; in produzione l’XML gzip arriva da `lw.feed_xml_artifact`. Aggiornata da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome).
+Feed Jooble Italy P1–4 (Talent: `/wrapping/talent/it`, Adzuna: `/wrapping/adzuna/it`). In produzione l’XML gzip arriva da `lw.feed_xml_artifact`. Aggiornata da `scripts/run_job_feed_pipeline.py` (6:00 e 15:00 Europe/Rome).
 
-Una riga per città ITA/ESP: `partnerJobId` = `{job_posting_id}-{ord}`. `apply_url` canonico senza query. Dopo `alembic upgrade head` (fino a `0022`) anche tabella `feed_xml_artifact`.
+Una riga per città: `partnerJobId` = `{job_posting_id}-{ord}`. `apply_url` canonico senza query.
 
 **Test manuale pipeline:**
 

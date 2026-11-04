@@ -89,7 +89,7 @@ def test_wrapping_adzuna_xml_and_cpc(client: TestClient):
         s.add(row)
         s.commit()
 
-    r = client.get("/wrapping/adzuna")
+    r = client.get("/wrapping/adzuna/it")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<jobs>" in r.text
@@ -168,7 +168,7 @@ def test_wrapping_jooble_apply_url_has_no_query_params(client: TestClient):
         s.add(row)
         s.commit()
 
-    r = client.get("/wrapping/jooble")
+    r = client.get("/wrapping/jooble/it")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<source>" in r.text
@@ -202,7 +202,7 @@ def test_wrapping_jooble_reads_from_jooble_job_feed_not_job_postings(client: Tes
         )
         s.commit()
 
-    r = client.get("/wrapping/jooble")
+    r = client.get("/wrapping/jooble/it")
     assert r.status_code == 200
     assert "<![CDATA[Only Jooble]]>" in r.text
     assert "Only LinkedIn" not in r.text
@@ -241,7 +241,7 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
         )
         s.commit()
 
-    r = client.get("/wrapping/jooble")
+    r = client.get("/wrapping/jooble/it")
     assert r.status_code == 200
     assert "<company><![CDATA[NewEmployer]]></company>" in r.text
     assert "<priority><![CDATA[3]]></priority>" in r.text
@@ -251,7 +251,7 @@ def test_wrapping_jooble_company_uses_employers_name(client: TestClient):
 
 def test_wrapping_jooble_empty(client: TestClient):
     """Jooble endpoint with no jobs returns valid XML."""
-    r = client.get("/wrapping/jooble")
+    r = client.get("/wrapping/jooble/it")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<source>" in r.text
@@ -260,7 +260,7 @@ def test_wrapping_jooble_empty(client: TestClient):
 
 def test_wrapping_talent_empty(client: TestClient):
     """Talent endpoint mirrors Jooble feed XML."""
-    r = client.get("/wrapping/talent")
+    r = client.get("/wrapping/talent/it")
     assert r.status_code == 200
     assert "application/xml" in r.headers.get("content-type", "")
     assert "<source>" in r.text
@@ -305,8 +305,8 @@ def test_wrapping_talent_and_jooble_use_normalized_html(client: TestClient):
         )
         s.commit()
 
-    talent = client.get("/wrapping/talent")
-    jooble = client.get("/wrapping/jooble")
+    talent = client.get("/wrapping/talent/it")
+    jooble = client.get("/wrapping/jooble/it")
     assert talent.status_code == 200
     assert jooble.status_code == 200
 
@@ -343,7 +343,7 @@ def test_wrapping_talent_falls_back_to_runtime_sanitize(client: TestClient):
         )
         s.commit()
 
-    talent = client.get("/wrapping/talent")
+    talent = client.get("/wrapping/talent/it")
     assert talent.status_code == 200
     assert "**" not in talent.text
     assert "<strong>Hello</strong>" in talent.text
@@ -363,7 +363,7 @@ def test_wrapping_serves_gzip_artifact(client: TestClient):
     with next(get_sess()) as s:  # type: ignore
         s.add(
             models.FeedXmlArtifact(
-                feed_name="talent",
+                feed_name="talent_it",
                 payload=payload,
                 content_type="application/xml",
                 job_count=1,
@@ -375,7 +375,7 @@ def test_wrapping_serves_gzip_artifact(client: TestClient):
         )
         s.commit()
 
-    r = client.get("/wrapping/talent")
+    r = client.get("/wrapping/talent/it")
     assert r.status_code == 200
     assert r.headers.get("content-encoding") == "gzip"
     assert r.headers.get("x-feed-job-count") == "1"
@@ -477,7 +477,7 @@ def test_wrapping_jooble_abroad_one_job(client: TestClient):
     assert "<applyUrl><![CDATA[https://www.joinrs.com/jobs/3218063]]></applyUrl>" in r.text
     assert "utm_" not in r.text.split("<applyUrl>")[1].split("</applyUrl>")[0]
 
-    r2 = client.get("/wrapping/jooble")
+    r2 = client.get("/wrapping/jooble/it")
     assert r2.status_code == 200
     assert "<countries>" not in r2.text
 

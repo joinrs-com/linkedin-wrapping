@@ -38,7 +38,7 @@ FEEDS: tuple[str, ...] = (
 
 # Back-compat aliases used by older imports / scripts
 BUCKETS = FEEDS
-BUCKET_ITA_ESP = FEED_IT  # root alias target
+BUCKET_ITA_ESP = FEED_IT
 BUCKET_USA = "usa_1"
 BUCKET_EU3 = FEED_EU
 BUCKET_ROW = FEED_ROW
@@ -310,11 +310,6 @@ def country_code_to_iso2(country_code: str | None) -> str:
 def artifact_name(platform: str, feed: str) -> str:
     """Canonical artifact key, e.g. jooble_usa_1."""
     return f"{platform}_{feed}"
-
-
-def legacy_root_artifact_name(platform: str) -> str:
-    """Compat keys for GET /wrapping/jooble|talent|adzuna (= Italy P1–4)."""
-    return platform
 
 
 def sql_bucket_case(*, country_expr: str, priority_expr: str, job_id_expr: str) -> str:

@@ -61,7 +61,7 @@ from api.wrapping.wrapping import (  # noqa: E402
     generate_adzuna_xml,
     generate_wrapping_xml,
 )
-from feed_buckets import FEEDS, artifact_name, legacy_root_artifact_name  # noqa: E402
+from feed_buckets import FEEDS, artifact_name  # noqa: E402
 
 
 @dataclass
@@ -333,7 +333,7 @@ def _generate_feed_xml_artifacts(
     *,
     platforms: set[str] | None = None,
 ) -> dict[str, dict]:
-    """Build gzip XML per platform × feed key (+ root aliases → Italy ``it``).
+    """Build gzip XML per platform × feed key.
 
     Loads one feed at a time (chunked). Full descriptions; MySQL LONGBLOB payload.
     platforms: optional subset of {"jooble","talent","adzuna"}; None = all.
@@ -400,46 +400,6 @@ def _generate_feed_xml_artifacts(
                 )
                 del a_rows
                 gc.collect()
-
-        # Compat: /wrapping/jooble|talent|adzuna → same payload as Italy P1–4 (``it``)
-        for platform in ("jooble", "talent", "adzuna"):
-            if platform not in want:
-                continue
-            src = artifact_name(platform, "it")
-            if src in stats:
-                legacy = legacy_root_artifact_name(platform)
-                dest_conn.execute(
-                    text(
-                        """
-                        INSERT INTO feed_xml_artifact
-                            (feed_name, payload, storage_uri, content_type, job_count,
-                             bytes_uncompressed, bytes_gzip, generated_at)
-                        SELECT :legacy, payload, storage_uri, content_type, job_count,
-                               bytes_uncompressed, bytes_gzip, generated_at
-                        FROM feed_xml_artifact
-                        WHERE feed_name = :src
-                        ON DUPLICATE KEY UPDATE
-                            payload = VALUES(payload),
-                            storage_uri = VALUES(storage_uri),
-                            content_type = VALUES(content_type),
-                            job_count = VALUES(job_count),
-                            bytes_uncompressed = VALUES(bytes_uncompressed),
-                            bytes_gzip = VALUES(bytes_gzip),
-                            generated_at = VALUES(generated_at)
-                        """
-                    ),
-                    {"legacy": legacy, "src": src},
-                )
-                dest_conn.commit()
-                # Root alias must stay byte-identical to the Italy feed.
-                fails = check_feed_xml_artifact_integrity(
-                    dest_conn, feed_names=[legacy], gunzip=True
-                )
-                if fails:
-                    raise RuntimeError(
-                        f"legacy artifact {legacy} integrity failed: {fails[0]}"
-                    )
-                stats[legacy] = {**stats[src], "feed_name": legacy}
     return stats
 
 

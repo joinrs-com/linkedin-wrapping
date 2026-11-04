@@ -30,7 +30,6 @@ check() {
 }
 
 for platform in jooble talent adzuna; do
-  check "${platform}" 1
   check "${platform}/it" 1
   check "${platform}/it5" 1
   check "${platform}/es" 1

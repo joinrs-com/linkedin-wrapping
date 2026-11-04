@@ -84,7 +84,6 @@ def public_path_for_feed(platform: str, feed: str) -> str:
 def build_probe_specs(
     *,
     include_live: bool = True,
-    include_root_aliases: bool = True,
     artifact_min_jobs: int | None = None,
     live_min_bytes: int | None = None,
 ) -> list[ProbeSpec]:
@@ -97,16 +96,6 @@ def build_probe_specs(
     min_bytes = DEFAULT_LIVE_MIN_BYTES if live_min_bytes is None else live_min_bytes
     specs: list[ProbeSpec] = []
     for platform in ARTIFACT_PLATFORMS:
-        if include_root_aliases:
-            specs.append(
-                ProbeSpec(
-                    name=platform,
-                    path=f"/wrapping/{platform}",
-                    min_jobs=min_jobs,
-                    require_gzip=True,
-                    check_stale=True,
-                )
-            )
         for feed in FEEDS:
             specs.append(
                 ProbeSpec(
@@ -309,7 +298,6 @@ def probe_all_feeds(
     *,
     base_url: str | None = None,
     include_live: bool = True,
-    include_root_aliases: bool = True,
     timeout: float = 45.0,
     stale_hours: int | None = None,
 ) -> list[ProbeResult]:
@@ -324,7 +312,6 @@ def probe_all_feeds(
     results: list[ProbeResult] = []
     for spec in build_probe_specs(
         include_live=include_live,
-        include_root_aliases=include_root_aliases,
     ):
         results.append(
             probe_endpoint(
@@ -351,13 +338,10 @@ def probe_results_as_dicts(results: list[ProbeResult]) -> list[dict[str, Any]]:
 
 
 def _format_artifact_lines(artifacts: dict[str, Any]) -> list[str]:
-    """Compact per-platform job counts (15 feeds + optional root alias)."""
+    """Compact per-platform job counts (15 feeds)."""
     lines: list[str] = []
     for platform in ARTIFACT_PLATFORMS:
         parts: list[str] = []
-        root = artifacts.get(platform)
-        if isinstance(root, dict):
-            parts.append(f"root={root.get('job_count', '?')}")
         for feed in FEEDS:
             key = f"{platform}_{feed}"
             stats = artifacts.get(key)
@@ -367,12 +351,11 @@ def _format_artifact_lines(artifacts: dict[str, Any]) -> list[str]:
             parts.append(f"{short}={stats.get('job_count', '?')}")
         if parts:
             lines.append(f"• `{platform}` " + " ".join(parts))
-    # Any leftover keys (legacy abroad, etc.)
-    known = set()
-    for platform in ARTIFACT_PLATFORMS:
-        known.add(platform)
-        for feed in FEEDS:
-            known.add(f"{platform}_{feed}")
+    known = {
+        f"{platform}_{feed}"
+        for platform in ARTIFACT_PLATFORMS
+        for feed in FEEDS
+    }
     extras = [k for k in artifacts if k not in known]
     for name in extras:
         stats = artifacts[name]

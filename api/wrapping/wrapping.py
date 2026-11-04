@@ -477,16 +477,6 @@ def _feed_response(
     return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
 
 
-async def get_wrapping_jooble(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/jooble: Italy priority 1–4 (alias of /jooble/it)."""
-    cached = _response_from_artifact(session, "jooble")
-    if cached is None:
-        cached = _response_from_artifact(session, "jooble_it")
-    if cached is not None:
-        return cached
-    return _feed_response(session, platform="jooble", feed="it", talent=False)
-
-
 async def get_wrapping_jooble_it(session: Session = Depends(get_session)) -> Response:
     return _feed_response(session, platform="jooble", feed="it")
 
@@ -534,16 +524,6 @@ async def get_wrapping_jooble_asia(session: Session = Depends(get_session)) -> R
 
 async def get_wrapping_jooble_row(session: Session = Depends(get_session)) -> Response:
     return _feed_response(session, platform="jooble", feed="row")
-
-
-async def get_wrapping_talent(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/talent: Italy priority 1–4."""
-    cached = _response_from_artifact(session, "talent")
-    if cached is None:
-        cached = _response_from_artifact(session, "talent_it")
-    if cached is not None:
-        return cached
-    return _feed_response(session, platform="talent", feed="it", talent=True)
 
 
 async def get_wrapping_talent_it(session: Session = Depends(get_session)) -> Response:
@@ -634,16 +614,6 @@ async def get_wrapping_whatjobs(session: Session = Depends(get_session)) -> Resp
         content=xml_content.encode("utf-8"),
         media_type="application/xml; charset=utf-8",
     )
-
-
-async def get_wrapping_adzuna(session: Session = Depends(get_session)) -> Response:
-    """GET /wrapping/adzuna: Italy priority 1–4 (CPC required)."""
-    cached = _response_from_artifact(session, "adzuna")
-    if cached is None:
-        cached = _response_from_artifact(session, "adzuna_it")
-    if cached is not None:
-        return cached
-    return _feed_response(session, platform="adzuna", feed="it", adzuna=True)
 
 
 async def get_wrapping_adzuna_it(session: Session = Depends(get_session)) -> Response:

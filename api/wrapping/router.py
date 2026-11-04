@@ -8,8 +8,7 @@ router = APIRouter(
     tags=["Wrapping"]
 )
 
-# Jooble — 14 feeds (root = Italy P1–4)
-router.get("/jooble")(wrapping.get_wrapping_jooble)
+# Jooble — 15 feeds (/it = Italy P1–4, /it5 = Italy P5)
 router.get("/jooble/it")(wrapping.get_wrapping_jooble_it)
 router.get("/jooble/it5")(wrapping.get_wrapping_jooble_it5)
 router.get("/jooble/es")(wrapping.get_wrapping_jooble_es)
@@ -27,7 +26,6 @@ router.get("/hirematic")(wrapping.get_wrapping_hirematic)
 router.get("/whatjobs")(wrapping.get_wrapping_whatjobs)
 
 # Talent — same geography as Jooble
-router.get("/talent")(wrapping.get_wrapping_talent)
 router.get("/talent/it")(wrapping.get_wrapping_talent_it)
 router.get("/talent/it5")(wrapping.get_wrapping_talent_it5)
 router.get("/talent/es")(wrapping.get_wrapping_talent_es)
@@ -41,7 +39,6 @@ router.get("/talent/asia")(wrapping.get_wrapping_talent_asia)
 router.get("/talent/row")(wrapping.get_wrapping_talent_row)
 
 # Adzuna — same geography (+ CPC)
-router.get("/adzuna")(wrapping.get_wrapping_adzuna)
 router.get("/adzuna/it")(wrapping.get_wrapping_adzuna_it)
 router.get("/adzuna/it5")(wrapping.get_wrapping_adzuna_it5)
 router.get("/adzuna/es")(wrapping.get_wrapping_adzuna_es)

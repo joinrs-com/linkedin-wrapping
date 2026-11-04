@@ -1332,11 +1332,10 @@ def campaign_artifact_feed_names(
     platforms: tuple[str, ...] = ("jooble", "talent", "adzuna"),
 ) -> list[str]:
     """Root aliases + platform_feed keys for jooble/talent/adzuna."""
-    from feed_buckets import FEEDS, artifact_name, legacy_root_artifact_name
+    from feed_buckets import FEEDS, artifact_name
 
     names: list[str] = []
     for platform in platforms:
-        names.append(legacy_root_artifact_name(platform))
         for feed in FEEDS:
             names.append(artifact_name(platform, feed))
     return names

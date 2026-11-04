@@ -36,9 +36,10 @@ def test_public_path_for_feed_usa_and_country():
 def test_build_probe_specs_covers_platforms_and_live():
     specs = build_probe_specs()
     names = {s.name for s in specs}
-    # 3 platforms × (1 root + 15 feeds) + 3 live
-    assert len(specs) == 3 * (1 + len(FEEDS)) + 3
-    assert "jooble" in names
+    # 3 platforms × 15 feeds + 3 live (no root aliases)
+    assert len(specs) == 3 * len(FEEDS) + 3
+    assert "jooble" not in names
+    assert "jooble_it" in names
     assert "jooble_usa_1" in names
     assert "talent_it5" in names
     assert "adzuna_row" in names

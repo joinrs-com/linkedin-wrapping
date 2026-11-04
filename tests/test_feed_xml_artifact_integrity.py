@@ -17,12 +17,12 @@ from job_feed_common import (  # noqa: E402
 )
 
 
-def test_campaign_artifact_feed_names_includes_roots_and_feeds():
+def test_campaign_artifact_feed_names_includes_feeds_only():
     names = campaign_artifact_feed_names(("jooble",))
-    assert "jooble" in names
+    assert "jooble" not in names
     assert "jooble_it" in names
     assert "jooble_usa_1" in names
-    assert "talent" not in names
+    assert "talent_it" not in names
 
 
 def test_check_feed_xml_artifact_integrity_length_mismatch():
