@@ -39,11 +39,15 @@ if _env_file.is_file():
     load_dotenv(_env_file, override=True)
 
 import improve_job_descriptions as ijd  # noqa: E402
+from feed_alerts import notify_pipeline_result  # noqa: E402
 from job_feed_common import (  # noqa: E402
     SyncResult,
     backfill_jooble_description_talent,
+    campaign_artifact_feed_names,
+    check_feed_xml_artifact_integrity,
     create_mysql_engine,
     load_sql,
+    purge_archived_job_postings_from_feeds,
     sync_feed_table,
     upsert_feed_xml_artifact,
 )
@@ -427,8 +431,38 @@ def _generate_feed_xml_artifacts(
                     {"legacy": legacy, "src": src},
                 )
                 dest_conn.commit()
+                # Root alias must stay byte-identical to the Italy feed.
+                fails = check_feed_xml_artifact_integrity(
+                    dest_conn, feed_names=[legacy], gunzip=True
+                )
+                if fails:
+                    raise RuntimeError(
+                        f"legacy artifact {legacy} integrity failed: {fails[0]}"
+                    )
                 stats[legacy] = {**stats[src], "feed_name": legacy}
     return stats
+
+
+def _assert_artifact_integrity(dest_engine, *, platforms: set[str] | None) -> None:
+    want = tuple(sorted(platforms)) if platforms else ("adzuna", "jooble", "talent")
+    names = campaign_artifact_feed_names(want)  # type: ignore[arg-type]
+    with dest_engine.connect() as conn:
+        failures = check_feed_xml_artifact_integrity(
+            conn, feed_names=names, gunzip=True
+        )
+    if failures:
+        preview = ", ".join(
+            f"{f.get('feed_name')}:{f.get('error')}" for f in failures[:12]
+        )
+        more = f" (+{len(failures) - 12} more)" if len(failures) > 12 else ""
+        raise RuntimeError(
+            f"feed_xml_artifact integrity failed for {len(failures)} feeds: "
+            f"{preview}{more}"
+        )
+    print(
+        f"  artifact integrity OK ({len(names)} feeds checked)",
+        flush=True,
+    )
 
 
 def _build_report(
@@ -553,6 +587,10 @@ def run_pipeline(
                     f"  {name}: jobs={stats['job_count']} "
                     f"raw={stats['bytes_uncompressed']} gzip={stats['bytes_gzip']}"
                 )
+            print("=" * 60)
+            print("Verify feed XML artifact integrity")
+            print("=" * 60)
+            _assert_artifact_integrity(dest_engine, platforms=artifact_platforms)
             finished_at = _utc_now_naive()
             report = _build_report(
                 started_at=started_at,
@@ -564,6 +602,10 @@ def run_pipeline(
             report["artifacts"] = artifact_stats
             _save_run_report(dest_engine, report, enrichment, {})
             print("\n" + json.dumps(report, indent=2, ensure_ascii=False))
+            try:
+                notify_pipeline_result(report)
+            except Exception as notify_exc:
+                print(f"  slack notify error: {notify_exc}", flush=True)
             return report
         except Exception as e:
             finished_at = _utc_now_naive()
@@ -579,6 +621,10 @@ def run_pipeline(
                 _save_run_report(dest_engine, report, enrichment, {})
             except Exception:
                 pass
+            try:
+                notify_pipeline_result(report)
+            except Exception as notify_exc:
+                print(f"  slack notify error: {notify_exc}", flush=True)
             print(json.dumps(report, indent=2, ensure_ascii=False), file=sys.stderr)
             traceback.print_exc()
             raise
@@ -608,6 +654,13 @@ def run_pipeline(
         else:
             print("Description refresh: OFF (default; pass --refresh-descriptions)")
         enriched: dict[int, str] = {}
+
+        print("=" * 60)
+        print("Purge archived job_postings from feed tables")
+        print("=" * 60)
+        with src_engine.connect() as src_conn, dest_engine.connect() as dest_conn:
+            purged = purge_archived_job_postings_from_feeds(dest_conn, src_conn)
+        print(f"  purge summary: {purged}", flush=True)
 
         for cfg in configs:
             do_refresh = (
@@ -667,6 +720,10 @@ def run_pipeline(
                     f"  {name}: jobs={stats['job_count']} "
                     f"raw={stats['bytes_uncompressed']} gzip={stats['bytes_gzip']}"
                 )
+            print("=" * 60)
+            print("Verify feed XML artifact integrity")
+            print("=" * 60)
+            _assert_artifact_integrity(dest_engine, platforms=artifact_platforms)
 
         finished_at = _utc_now_naive()
         report = _build_report(
@@ -680,6 +737,10 @@ def run_pipeline(
             report["artifacts"] = artifact_stats
         _save_run_report(dest_engine, report, enrichment, feed_results)
         print("\n" + json.dumps(report, indent=2, ensure_ascii=False))
+        try:
+            notify_pipeline_result(report)
+        except Exception as notify_exc:
+            print(f"  slack notify error: {notify_exc}", flush=True)
         return report
 
     except Exception as e:
@@ -703,6 +764,10 @@ def run_pipeline(
             _save_run_report(dest_engine, report, enrichment, partial)
         except Exception:
             pass
+        try:
+            notify_pipeline_result(report)
+        except Exception as notify_exc:
+            print(f"  slack notify error: {notify_exc}", flush=True)
         print(json.dumps(report, indent=2, ensure_ascii=False), file=sys.stderr)
         traceback.print_exc()
         raise

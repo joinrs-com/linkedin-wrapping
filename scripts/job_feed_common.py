@@ -109,6 +109,7 @@ def _fetch_job_descriptions(
 def create_mysql_engine(url: str) -> Engine:
     # Long feed syncs (normalize + multi-row INSERT) need generous I/O timeouts;
     # pool_pre_ping recovers stale pooled connections between chunks.
+    # binary_prefix=_binary helps large LONGBLOB upserts stay intact over text protocol.
     eng = create_engine(
         url,
         pool_recycle=1800,
@@ -118,6 +119,7 @@ def create_mysql_engine(url: str) -> Engine:
             "connect_timeout": 60,
             "read_timeout": 1800,
             "write_timeout": 1800,
+            "binary_prefix": True,
         },
     )
     if eng.dialect.name != "mysql":
@@ -1030,48 +1032,28 @@ def backfill_jooble_description_talent(
     return updated
 
 
-def upsert_feed_xml_artifact(
-    dest_conn: Connection,
-    *,
-    feed_name: str,
-    xml_text: str,
-    job_count: int,
-) -> dict[str, Any]:
-    """Gzip full XML and store outside MySQL when FEED_XML_S3_BUCKET/DIR is set.
+_MAX_PACKET_WARNED = False
 
-    Campaign catalogs with full descriptions exceed max_allowed_packet (~64MiB);
-    put gzip on S3/filesystem and UPSERT metadata (payload NULL) into feed_xml_artifact.
-    """
-    from utils.feed_xml_storage import external_storage_configured, put_gzip
 
-    raw = xml_text.encode("utf-8")
-    compresslevel = 9 if len(raw) >= 50_000_000 else 6
-    payload = gzip.compress(raw, compresslevel=compresslevel)
-    generated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    print(
-        f"  artifact {feed_name}: jobs={job_count} "
-        f"raw={len(raw)} gzip={len(payload)} compress={compresslevel}",
-        flush=True,
-    )
+def _raise_max_allowed_packet(conn: Connection) -> None:
+    """Best-effort; RDS often makes max_allowed_packet session-read-only (global 64MiB)."""
+    global _MAX_PACKET_WARNED
+    try:
+        conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
+    except Exception as exc:  # noqa: BLE001
+        if not _MAX_PACKET_WARNED:
+            _MAX_PACKET_WARNED = True
+            msg = str(exc).split("\n", 1)[0]
+            print(
+                f"  artifact warn: could not raise max_allowed_packet ({msg})",
+                flush=True,
+            )
 
-    storage_uri: str | None = None
-    db_payload: bytes | None = payload
-    if external_storage_configured():
-        storage_uri = put_gzip(feed_name, payload)
-        db_payload = None
-        print(f"  artifact {feed_name}: stored at {storage_uri}", flush=True)
-    else:
-        print(
-            "  artifact warn: FEED_XML_S3_BUCKET/FEED_XML_STORAGE_DIR unset; "
-            "writing gzip into MySQL (may fail if > max_allowed_packet)",
-            flush=True,
-        )
-        try:
-            dest_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
-        except Exception as exc:  # noqa: BLE001
-            print(f"  artifact warn: could not raise max_allowed_packet: {exc}", flush=True)
 
-    stmt = text(
+def _artifact_upsert_stmt():
+    from sqlalchemy import LargeBinary, bindparam
+
+    return text(
         """
         INSERT INTO feed_xml_artifact
             (feed_name, payload, storage_uri, content_type, job_count,
@@ -1088,44 +1070,177 @@ def upsert_feed_xml_artifact(
             bytes_gzip = VALUES(bytes_gzip),
             generated_at = VALUES(generated_at)
         """
-    )
+    ).bindparams(bindparam("payload", type_=LargeBinary()))
+
+
+def _verify_mysql_artifact_payload(
+    conn: Connection,
+    *,
+    feed_name: str,
+    expected: bytes,
+) -> None:
+    """Raise if stored LONGBLOB length/CRC does not match the gzip we wrote."""
+    row = conn.execute(
+        text(
+            """
+            SELECT LENGTH(payload) AS plen, payload
+            FROM feed_xml_artifact
+            WHERE feed_name = :n
+            """
+        ),
+        {"n": feed_name},
+    ).mappings().first()
+    if row is None:
+        raise RuntimeError(f"artifact {feed_name}: missing after upsert")
+    plen = int(row["plen"] or 0)
+    if plen != len(expected):
+        raise RuntimeError(
+            f"artifact {feed_name}: LENGTH(payload)={plen} != expected {len(expected)}"
+        )
+    stored = row["payload"]
+    if stored is None:
+        raise RuntimeError(f"artifact {feed_name}: payload NULL after MySQL upsert")
+    blob = bytes(stored)
+    if len(blob) != len(expected):
+        raise RuntimeError(
+            f"artifact {feed_name}: read-back len={len(blob)} != expected {len(expected)}"
+        )
+    if blob != expected:
+        raise RuntimeError(
+            f"artifact {feed_name}: read-back bytes differ from written gzip"
+        )
+    try:
+        gzip.decompress(blob)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"artifact {feed_name}: gunzip CRC/integrity failed: {exc}"
+        ) from exc
+
+
+def _write_mysql_artifact_payload(
+    conn: Connection,
+    *,
+    feed_name: str,
+    payload: bytes,
+    storage_uri: str | None,
+    job_count: int,
+    bytes_uncompressed: int,
+    generated_at: datetime,
+) -> None:
+    """UPSERT gzip into MySQL and verify LENGTH + gunzip (retry once on failure)."""
+    payload = bytes(payload)
+    stmt = _artifact_upsert_stmt()
     params = {
         "feed_name": feed_name,
-        "payload": db_payload,
+        "payload": payload,
         "storage_uri": storage_uri,
         "content_type": "application/xml",
         "job_count": job_count,
-        "bytes_uncompressed": len(raw),
+        "bytes_uncompressed": bytes_uncompressed,
         "bytes_gzip": len(payload),
         "generated_at": generated_at,
     }
-    try:
-        dest_conn.execute(stmt, params)
-        dest_conn.commit()
-    except (OperationalError, DBAPIError, OSError) as exc:
-        if storage_uri is not None:
-            raise
-        if not _is_transient_db_error(exc) and "max_allowed_packet" not in str(exc).lower():
-            raise
+
+    def _attempt(target: Connection, *, label: str) -> None:
+        _raise_max_allowed_packet(target)
+        target.execute(stmt, params)
+        target.commit()
+        _verify_mysql_artifact_payload(target, feed_name=feed_name, expected=payload)
         print(
-            f"  artifact retry {feed_name} after {exc.__class__.__name__}: reconnect…",
+            f"  artifact {feed_name}: MySQL payload verified "
+            f"({len(payload)} bytes, {label})",
+            flush=True,
+        )
+
+    try:
+        _attempt(conn, label="ok")
+        return
+    except Exception as first_exc:  # noqa: BLE001
+        print(
+            f"  artifact {feed_name}: verify/write failed "
+            f"({first_exc.__class__.__name__}: {first_exc}); reconnect + retry…",
             flush=True,
         )
         try:
-            dest_conn.rollback()
+            conn.rollback()
         except Exception:
             pass
         try:
-            dest_conn.invalidate()
+            conn.invalidate()
         except Exception:
             pass
-        with dest_conn.engine.connect() as retry_conn:
-            try:
-                retry_conn.execute(text("SET SESSION max_allowed_packet = 536870912"))
-            except Exception:
-                pass
-            retry_conn.execute(stmt, params)
-            retry_conn.commit()
+
+    with conn.engine.connect() as retry_conn:
+        try:
+            _attempt(retry_conn, label="retry")
+        except Exception as second_exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"artifact {feed_name}: MySQL gzip upsert failed after retry "
+                f"({second_exc})"
+            ) from second_exc
+
+
+def upsert_feed_xml_artifact(
+    dest_conn: Connection,
+    *,
+    feed_name: str,
+    xml_text: str,
+    job_count: int,
+) -> dict[str, Any]:
+    """Gzip full XML; prefer S3/filesystem, else MySQL LONGBLOB with verify-after-write.
+
+    Campaign catalogs with full descriptions can exceed max_allowed_packet (~64MiB)
+    when escaped on the wire; optional FEED_XML_S3_BUCKET/DIR stores gzip outside MySQL.
+    MySQL path always re-reads LENGTH(payload) and gunzips before succeeding.
+    """
+    from utils.feed_xml_storage import external_storage_configured, put_gzip
+
+    raw = xml_text.encode("utf-8")
+    compresslevel = 9 if len(raw) >= 50_000_000 else 6
+    payload = bytes(gzip.compress(raw, compresslevel=compresslevel))
+    generated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    print(
+        f"  artifact {feed_name}: jobs={job_count} "
+        f"raw={len(raw)} gzip={len(payload)} compress={compresslevel}",
+        flush=True,
+    )
+
+    storage_uri: str | None = None
+    if external_storage_configured():
+        storage_uri = put_gzip(feed_name, payload)
+        print(f"  artifact {feed_name}: stored at {storage_uri}", flush=True)
+        # Metadata only in MySQL (payload NULL).
+        stmt = _artifact_upsert_stmt()
+        params = {
+            "feed_name": feed_name,
+            "payload": None,
+            "storage_uri": storage_uri,
+            "content_type": "application/xml",
+            "job_count": job_count,
+            "bytes_uncompressed": len(raw),
+            "bytes_gzip": len(payload),
+            "generated_at": generated_at,
+        }
+        try:
+            dest_conn.execute(stmt, params)
+            dest_conn.commit()
+        except (OperationalError, DBAPIError, OSError):
+            raise
+    else:
+        print(
+            "  artifact: FEED_XML_S3_BUCKET/FEED_XML_STORAGE_DIR unset; "
+            "writing gzip into MySQL with integrity check",
+            flush=True,
+        )
+        _write_mysql_artifact_payload(
+            dest_conn,
+            feed_name=feed_name,
+            payload=payload,
+            storage_uri=None,
+            job_count=job_count,
+            bytes_uncompressed=len(raw),
+            generated_at=generated_at,
+        )
     return {
         "feed_name": feed_name,
         "job_count": job_count,
@@ -1134,6 +1249,183 @@ def upsert_feed_xml_artifact(
         "storage_uri": storage_uri,
         "generated_at": generated_at.isoformat(),
     }
+
+
+def check_feed_xml_artifact_integrity(
+    dest_conn: Connection,
+    *,
+    feed_names: list[str],
+    gunzip: bool = True,
+) -> list[dict[str, Any]]:
+    """Return integrity failures for named artifacts (delta / CRC / NULL payload).
+
+    Skips rows that use external ``storage_uri`` with NULL MySQL payload.
+    """
+    names = list(feed_names)
+    if not names:
+        return []
+
+    placeholders = ", ".join(f":n{i}" for i in range(len(names)))
+    params = {f"n{i}": n for i, n in enumerate(names)}
+    rows = dest_conn.execute(
+        text(
+            f"""
+            SELECT feed_name, job_count, LENGTH(payload) AS plen, bytes_gzip,
+                   storage_uri, payload
+            FROM feed_xml_artifact
+            WHERE feed_name IN ({placeholders})
+            """
+        ),
+        params,
+    ).mappings().all()
+    by_name = {r["feed_name"]: r for r in rows}
+    failures: list[dict[str, Any]] = []
+    for name in names:
+        row = by_name.get(name)
+        if row is None:
+            failures.append({"feed_name": name, "error": "missing_artifact"})
+            continue
+        uri = row.get("storage_uri")
+        plen = row.get("plen")
+        bgz = int(row["bytes_gzip"] or 0)
+        if uri and plen is None:
+            # External object — size trusted via bytes_gzip metadata only.
+            continue
+        if plen is None:
+            failures.append(
+                {
+                    "feed_name": name,
+                    "error": "null_payload",
+                    "bytes_gzip": bgz,
+                    "storage_uri": uri,
+                }
+            )
+            continue
+        plen_i = int(plen)
+        if plen_i != bgz:
+            failures.append(
+                {
+                    "feed_name": name,
+                    "error": "length_mismatch",
+                    "plen": plen_i,
+                    "bytes_gzip": bgz,
+                    "delta": bgz - plen_i,
+                }
+            )
+            continue
+        if gunzip and row.get("payload") is not None:
+            try:
+                gzip.decompress(bytes(row["payload"]))
+            except Exception as exc:  # noqa: BLE001
+                failures.append(
+                    {
+                        "feed_name": name,
+                        "error": f"gunzip_failed:{exc.__class__.__name__}",
+                        "plen": plen_i,
+                        "bytes_gzip": bgz,
+                    }
+                )
+    return failures
+
+
+def campaign_artifact_feed_names(
+    platforms: tuple[str, ...] = ("jooble", "talent", "adzuna"),
+) -> list[str]:
+    """Root aliases + platform_feed keys for jooble/talent/adzuna."""
+    from feed_buckets import FEEDS, artifact_name, legacy_root_artifact_name
+
+    names: list[str] = []
+    for platform in platforms:
+        names.append(legacy_root_artifact_name(platform))
+        for feed in FEEDS:
+            names.append(artifact_name(platform, feed))
+    return names
+
+
+def purge_archived_job_postings_from_feeds(
+    dest_conn: Connection,
+    source_conn: Connection,
+    *,
+    tables: tuple[tuple[str, str], ...] = (
+        ("jooble_job_feed", "job_posting_id"),
+        ("adzuna_job_feed", "job_posting_id"),
+        ("whatjobs_job_feed", "id"),
+        ("jobrapido_job_feed", "job_posting_id"),
+        ("hirematic_job_feed", "id"),
+    ),
+    chunk_size: int = 1000,
+) -> dict[str, int]:
+    """DELETE feed rows whose job exists only in job_postings_archived_1 (not active)."""
+    jp = mysql_identifier(os.getenv("JOB_FEED_DB_JOB_POSTINGS", "job_postings"))
+    deleted_by_table: dict[str, int] = {}
+    for table, id_col in tables:
+        exists = dest_conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = :t"
+            ),
+            {"t": table},
+        ).scalar()
+        if not exists:
+            continue
+        # Collect distinct job ids from dest feed table.
+        feed_ids = [
+            int(r[0])
+            for r in dest_conn.execute(
+                text(f"SELECT DISTINCT {id_col} FROM {table} WHERE {id_col} IS NOT NULL")
+            ).fetchall()
+            if r[0] is not None
+        ]
+        if not feed_ids:
+            deleted_by_table[table] = 0
+            continue
+        archived_only: list[int] = []
+        for chunk in _chunked(feed_ids, chunk_size):
+            placeholders = ", ".join(f":id{i}" for i in range(len(chunk)))
+            params = {f"id{i}": v for i, v in enumerate(chunk)}
+            active = {
+                int(r[0])
+                for r in source_conn.execute(
+                    text(
+                        f"SELECT id FROM {jp}.job_postings_1 "
+                        f"WHERE id IN ({placeholders})"
+                    ),
+                    params,
+                ).fetchall()
+            }
+            archived = {
+                int(r[0])
+                for r in source_conn.execute(
+                    text(
+                        f"SELECT id FROM {jp}.job_postings_archived_1 "
+                        f"WHERE id IN ({placeholders})"
+                    ),
+                    params,
+                ).fetchall()
+            }
+            for jid in chunk:
+                if jid not in active and jid in archived:
+                    archived_only.append(jid)
+        removed = 0
+        for chunk in _chunked(archived_only, chunk_size):
+            placeholders = ", ".join(f":id{i}" for i in range(len(chunk)))
+            params = {f"id{i}": v for i, v in enumerate(chunk)}
+            result = dest_conn.execute(
+                text(
+                    f"DELETE FROM {table} WHERE {id_col} IN ({placeholders})"
+                ),
+                params,
+            )
+            removed += int(result.rowcount or 0)
+        if archived_only:
+            dest_conn.commit()
+        deleted_by_table[table] = removed
+        print(
+            f"  purge archived from {table}: "
+            f"jobs={len(archived_only)} rows_deleted={removed}",
+            flush=True,
+        )
+    return deleted_by_table
 
 
 def load_feed_xml_gzip(dest_conn: Connection, feed_name: str) -> tuple[bytes, int]:

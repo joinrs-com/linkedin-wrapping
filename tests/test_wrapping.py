@@ -368,7 +368,8 @@ def test_wrapping_serves_gzip_artifact(client: TestClient):
                 content_type="application/xml",
                 job_count=1,
                 bytes_uncompressed=len(xml.encode("utf-8")),
-                bytes_gzip=len(payload),
+                # Deliberately wrong metadata: Content-Length must use real payload.
+                bytes_gzip=len(payload) + 4,
                 generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             )
         )
@@ -378,6 +379,7 @@ def test_wrapping_serves_gzip_artifact(client: TestClient):
     assert r.status_code == 200
     assert r.headers.get("content-encoding") == "gzip"
     assert r.headers.get("x-feed-job-count") == "1"
+    assert r.headers.get("content-length") == str(len(payload))
     # httpx may auto-decompress; body must contain the artifact marker either way
     body = r.content
     if body[:2] == b"\x1f\x8b":

@@ -58,21 +58,26 @@ def _response_from_artifact(session: Session, feed_name: str) -> StreamingRespon
         "X-Feed-Job-Count": str(artifact.job_count),
         "X-Feed-Generated-At": artifact.generated_at.isoformat() if artifact.generated_at else "",
     }
-    bytes_gzip = int(getattr(artifact, "bytes_gzip", 0) or 0)
-    if bytes_gzip > 0:
-        headers["Content-Length"] = str(bytes_gzip)
 
     if storage_uri:
         from utils.feed_xml_storage import iter_gzip
 
+        # Prefer real object size; fall back to metadata only when positive.
+        bytes_gzip = int(getattr(artifact, "bytes_gzip", 0) or 0)
+        if bytes_gzip > 0:
+            headers["Content-Length"] = str(bytes_gzip)
         return StreamingResponse(
             iter_gzip(str(storage_uri)),
             media_type="application/xml; charset=utf-8",
             headers=headers,
         )
 
+    # MySQL path: always advertise the actual blob length (metadata can drift
+    # if a prior write truncated the LONGBLOB).
+    body = bytes(payload)
+    headers["Content-Length"] = str(len(body))
     return StreamingResponse(
-        BytesIO(payload),
+        BytesIO(body),
         media_type="application/xml; charset=utf-8",
         headers=headers,
     )

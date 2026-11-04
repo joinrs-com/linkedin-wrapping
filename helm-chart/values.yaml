@@ -37,6 +37,11 @@ jobFeedPipeline:
   sourceDatabaseSecretKey: job-feed-source-database-url
   openaiSecretName: openai-api-key
   openaiSecretKey: OPENAI_API_KEY
+  # Incoming Webhook Slack (optional secret — create before enabling alerts):
+  # kubectl -n lw create secret generic slack-webhook --from-literal=url='https://hooks.slack.com/services/...'
+  slackWebhookSecretName: slack-webhook
+  slackWebhookSecretKey: url
+  feedPublicBaseUrl: "https://lw.joinrs.com"
   resources:
     limits:
       cpu: "1"
@@ -45,6 +50,25 @@ jobFeedPipeline:
     requests:
       cpu: 100m
       memory: 2Gi
+
+# Hourly HTTP probes of public /wrapping/* URLs (Slack only on failure).
+feedHealthCheck:
+  enabled: true
+  suspend: false
+  schedule: "15 * * * *"
+  timeZone: "Europe/Rome"
+  activeDeadlineSeconds: 1800
+  feedPublicBaseUrl: "https://lw.joinrs.com"
+  staleHours: "24"
+  slackWebhookSecretName: slack-webhook
+  slackWebhookSecretKey: url
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
 
 
 ingress:

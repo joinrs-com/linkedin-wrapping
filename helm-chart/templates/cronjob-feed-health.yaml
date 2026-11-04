@@ -1,0 +1,53 @@
+{{- if .Values.feedHealthCheck.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: linkedin-wrapping-feed-health
+  labels:
+    app: linkedin-wrapping-service
+spec:
+  suspend: {{ .Values.feedHealthCheck.suspend }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 5
+  schedule: {{ .Values.feedHealthCheck.schedule | quote }}
+  {{- if .Values.feedHealthCheck.timeZone }}
+  timeZone: {{ .Values.feedHealthCheck.timeZone | quote }}
+  {{- end }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.feedHealthCheck.activeDeadlineSeconds }}
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: linkedin-wrapping-service-feed-health
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: feed-health
+              image: {{ .Values.image | quote }}
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - scripts/check_feed_endpoints.py
+              env:
+                - name: FEED_PUBLIC_BASE_URL
+                  value: {{ .Values.feedHealthCheck.feedPublicBaseUrl | quote }}
+                - name: FEED_STALE_HOURS
+                  value: {{ .Values.feedHealthCheck.staleHours | quote }}
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.feedHealthCheck.slackWebhookSecretName | quote }}
+                      key: {{ .Values.feedHealthCheck.slackWebhookSecretKey | quote }}
+                      optional: true
+              resources:
+                limits:
+                  cpu: {{ .Values.feedHealthCheck.resources.limits.cpu | quote }}
+                  memory: {{ .Values.feedHealthCheck.resources.limits.memory | quote }}
+                requests:
+                  cpu: {{ .Values.feedHealthCheck.resources.requests.cpu | quote }}
+                  memory: {{ .Values.feedHealthCheck.resources.requests.memory | quote }}
+{{- end }}
