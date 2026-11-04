@@ -1,4 +1,4 @@
-"""Tests for incremental job feed sync and enrichment helpers."""
+"""Tests for incremental job feed sync helpers."""
 
 from __future__ import annotations
 
@@ -21,6 +21,31 @@ from job_feed_common import (  # noqa: E402
     slim_feed_select_sql,
     sync_feed_table,
 )
+
+
+@pytest.mark.parametrize("driver", ["pymysql", "mysqlconnector"])
+def test_mysql_engine_options_are_accepted_by_selected_driver(monkeypatch, driver):
+    """Validate options with the real DB driver, without opening network sockets."""
+    import job_feed_common as common
+
+    real_create_engine = common.create_engine
+
+    def validate_options(url, **kwargs):
+        engine = real_create_engine(url, **kwargs)
+        args, params = engine.dialect.create_connect_args(engine.url)
+        assert not args
+        params.update(kwargs["connect_args"])
+        if driver == "mysqlconnector":
+            from mysql.connector.connection import MySQLConnection
+            MySQLConnection().config(**params)
+        else:
+            from pymysql.connections import Connection
+            Connection(defer_connect=True, **params)
+        return engine
+
+    monkeypatch.setattr(common, "create_engine", validate_options)
+    engine = common.create_mysql_engine(f"mysql+{driver}://test:test@localhost/test")
+    engine.dispose()
 
 
 def test_load_sql_preserves_mysql_percent_literals(tmp_path):
@@ -345,101 +370,92 @@ def test_insert_rows_uses_multi_row_insert_per_chunk(sqlite_pair):
     assert count == 7
 
 
-def test_should_enrich_requires_italy_and_priority():
-    import improve_job_descriptions as ijd
-
-    assert ijd.should_enrich_with_openai(priority=2, has_ita=1, employers_id=123) is True
-    assert ijd.should_enrich_with_openai(priority=2, has_ita=0, employers_id=123) is False
-    assert ijd.should_enrich_with_openai(priority=4, has_ita=1, employers_id=123) is False
-    assert ijd.should_enrich_with_openai(priority=1, has_ita=1, employers_id=829928) is False
-
-
-def test_run_enrichment_skips_existing(monkeypatch):
-    import improve_job_descriptions as ijd
-    from sqlmodel import SQLModel
-
-    from api.wrapping.models import JobDescriptionEnriched
-
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine, tables=[JobDescriptionEnriched.__table__])
-
-    inputs = [
-        {"job_id": 1, "input_description": "<p>a</p>", "priority": 2, "has_ita": 1, "employers_id": 100},
-        {"job_id": 2, "input_description": "<p>b</p>", "priority": 2, "has_ita": 1, "employers_id": 101},
-    ]
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(
-        ijd,
-        "improve_job_description_with_openai",
-        lambda job_description, strict=False: f"AI:{job_description}",
-    )
-
-    first = ijd.run_enrichment_pipeline(inputs, engine=engine)
-    assert first.processed == 2
-    assert first.total == 2
-
-    second = ijd.run_enrichment_pipeline(inputs, engine=engine)
-    assert second.processed == 0
-    assert second.total == 2
-
-
-def test_enrichment_aborts_on_openai_error(monkeypatch):
-    import improve_job_descriptions as ijd
+@pytest.mark.parametrize("integrity_error", [False, True])
+def test_artifact_pipeline_reports_without_openai(monkeypatch, integrity_error):
+    """Retiring OpenAI must preserve artifact generation and success/failure reports."""
+    import run_job_feed_pipeline as pipeline
+    from api.wrapping.models import JobFeedPipelineRun
+    from feed_database import create_database_engine
     from sqlmodel import SQLModel, select
 
-    from api.wrapping.models import JobDescriptionEnriched
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("JOB_FEED_SOURCE_DATABASE_URL", raising=False)
+    engine = create_database_engine()
+    SQLModel.metadata.create_all(engine, tables=[JobFeedPipelineRun.__table__])
+    monkeypatch.setattr(pipeline, "create_database_engine", lambda: engine)
+    stats = {"jooble_it": {"job_count": 1, "bytes_uncompressed": 20, "bytes_gzip": 30}}
+    monkeypatch.setattr(pipeline, "_generate_feed_xml_artifacts", lambda *a, **kw: stats)
 
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine, tables=[JobDescriptionEnriched.__table__])
+    def verify(*args, **kwargs):
+        if integrity_error:
+            raise RuntimeError("artifact integrity failure")
 
-    inputs = [
-        {"job_id": 1, "input_description": "<p>a</p>", "priority": 2, "has_ita": 1, "employers_id": 100},
-        {"job_id": 2, "input_description": "<p>b</p>", "priority": 2, "has_ita": 1, "employers_id": 101},
-    ]
-
-    def _raise_on_strict(job_description, strict=False):
-        if strict:
-            raise ijd.OpenAIEnrichmentError("invalid_api_key")
-        return job_description
-
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(ijd, "improve_job_description_with_openai", _raise_on_strict)
-
-    with pytest.raises(ijd.OpenAIEnrichmentError):
-        ijd.run_enrichment_pipeline(inputs, engine=engine)
+    monkeypatch.setattr(pipeline, "_assert_artifact_integrity", verify)
+    notifications = []
+    monkeypatch.setattr(pipeline, "notify_pipeline_result", notifications.append)
+    if integrity_error:
+        with pytest.raises(RuntimeError, match="artifact integrity failure"):
+            pipeline.run_pipeline(artifacts_only=True)
+    else:
+        report = pipeline.run_pipeline(artifacts_only=True)
+        assert report["artifacts"] == stats
 
     with Session(engine) as session:
-        rows = session.exec(select(JobDescriptionEnriched)).all()
-    assert len(rows) == 0
+        run = session.exec(select(JobFeedPipelineRun)).one()
+        assert run.status == ("failed" if integrity_error else "success")
+        assert run.openai_processed == run.enriched_deleted == run.enriched_total == 0
+    assert len(notifications) == 1
+    assert notifications[0]["status"] == run.status
+    engine.dispose()
 
 
-def test_improve_job_description_strict_raises(monkeypatch):
-    import improve_job_descriptions as ijd
-    import openai
+def test_default_pipeline_syncs_all_feeds_and_records_run(monkeypatch):
+    """Exercise the CronJob's default entry point without production writes."""
+    import run_job_feed_pipeline as pipeline
+    from api.wrapping.models import JobFeedPipelineRun
+    from feed_database import create_database_engine
+    from sqlmodel import SQLModel, select
 
-    class FakeCompletions:
-        @staticmethod
-        def create(**kwargs):
-            raise Exception("401 invalid_api_key")
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")
+    monkeypatch.setenv("JOB_FEED_SOURCE_DATABASE_URL", "mysql+pymysql://unused/source")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    engine = create_database_engine()
+    SQLModel.metadata.create_all(engine, tables=[JobFeedPipelineRun.__table__])
+    monkeypatch.setattr(pipeline, "create_database_engine", lambda: engine)
+    monkeypatch.setattr(pipeline, "create_mysql_engine", lambda url: engine)
+    monkeypatch.setattr(pipeline, "purge_archived_job_postings_from_feeds", lambda *a: {})
+    synced = []
 
-    class FakeChat:
-        completions = FakeCompletions()
+    def sync(dest, source, **kwargs):
+        assert kwargs["select_sql"]
+        assert kwargs["enriched"] == {}
+        assert kwargs["refresh_descriptions"] is False
+        synced.append(kwargs["table"])
+        return pipeline.SyncResult(active=2, inserted=1, deleted=0, unchanged=1, total=2)
 
-    class FakeClient:
-        chat = FakeChat()
+    monkeypatch.setattr(pipeline, "sync_feed_table", sync)
+    monkeypatch.setattr(pipeline, "backfill_jooble_description_talent", lambda *a: 0)
+    artifacts = []
+    monkeypatch.setattr(
+        pipeline, "_generate_feed_xml_artifacts",
+        lambda *a, **kw: artifacts.append("generated") or {},
+    )
+    monkeypatch.setattr(
+        pipeline, "_assert_artifact_integrity",
+        lambda *a, **kw: artifacts.append("verified"),
+    )
+    monkeypatch.setattr(pipeline, "notify_pipeline_result", lambda report: None)
+    report = pipeline.run_pipeline()
 
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(openai, "OpenAI", lambda api_key: FakeClient())
-
-    with pytest.raises(ijd.OpenAIEnrichmentError):
-        ijd.improve_job_description_with_openai("<p>x</p>", strict=True)
-
-    assert ijd.improve_job_description_with_openai("<p>x</p>", strict=False) == "<p>x</p>"
+    assert synced == [cfg.table for cfg in pipeline.FEED_CONFIGS]
+    assert artifacts == ["generated", "verified"]
+    assert report["status"] == "success"
+    assert set(report["feeds"]) == {cfg.name for cfg in pipeline.FEED_CONFIGS}
+    with Session(engine) as session:
+        run = session.exec(select(JobFeedPipelineRun)).one()
+        assert run.status == "success"
+        assert run.jooble_total == run.adzuna_total == run.whatjobs_total == 2
+        assert run.hirematic_total == run.jobrapido_total == 2
+        assert run.openai_processed == 0
+    engine.dispose()

@@ -43,11 +43,6 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.jobFeedPipeline.sourceDatabaseSecretName | quote }}
                       key: {{ .Values.jobFeedPipeline.sourceDatabaseSecretKey | quote }}
-                - name: OPENAI_API_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.jobFeedPipeline.openaiSecretName | quote }}
-                      key: {{ .Values.jobFeedPipeline.openaiSecretKey | quote }}
                 - name: SLACK_WEBHOOK_URL
                   valueFrom:
                     secretKeyRef:

@@ -165,3 +165,6 @@
 
 **/.vscode/
 
+
+# Share empty environment templates, never local credentials.
+!**/.env.example

@@ -28,7 +28,7 @@ _env_file = project_root / ".env"
 if _env_file.is_file():
     load_dotenv(_env_file, override=True)
 
-import improve_job_descriptions as ijd  # noqa: E402
+from feed_database import create_database_engine  # noqa: E402
 
 
 def _utc_now() -> str:
@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> None:
     if not os.getenv("DATABASE_URL"):
         raise SystemExit("DATABASE_URL non impostata")
 
-    engine = ijd.create_database_engine()
+    engine = create_database_engine()
     if args.once:
         _snapshot(engine)
         return

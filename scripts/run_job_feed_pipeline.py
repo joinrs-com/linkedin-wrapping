@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pipeline incrementale feed job: sync export senza TRUNCATE (OpenAI enrichment skipped).
+Pipeline incrementale feed job: sync export senza TRUNCATE.
 
 Uso:
     DATABASE_URL                    → joinrs-intelligence/lw (destinazione)
@@ -38,7 +38,7 @@ _env_file = project_root / ".env"
 if _env_file.is_file():
     load_dotenv(_env_file, override=True)
 
-import improve_job_descriptions as ijd  # noqa: E402
+from feed_database import create_database_engine  # noqa: E402
 from feed_alerts import notify_pipeline_result  # noqa: E402
 from job_feed_common import (  # noqa: E402
     SyncResult,
@@ -430,7 +430,6 @@ def _build_report(
     started_at: datetime,
     finished_at: datetime,
     status: str,
-    enrichment: ijd.EnrichmentResult,
     feed_results: dict[str, SyncResult],
     error_message: str | None = None,
 ) -> dict:
@@ -440,11 +439,12 @@ def _build_report(
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
         "duration_sec": duration,
+        # Keep legacy report fields compatible with historical pipeline runs.
         "openai": {
-            "processed": enrichment.processed,
-            "deleted": enrichment.deleted,
-            "total": enrichment.total,
-            "eligible_active": enrichment.eligible_active,
+            "processed": 0,
+            "deleted": 0,
+            "total": 0,
+            "eligible_active": 0,
         },
         "feeds": {
             name: {
@@ -467,7 +467,7 @@ def _feed_or_zero(feeds: dict[str, SyncResult], name: str) -> SyncResult:
     return feeds.get(name) or SyncResult(0, 0, 0, 0, 0)
 
 
-def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult, feed_results: dict[str, SyncResult]) -> None:
+def _save_run_report(dest_engine, report: dict, feed_results: dict[str, SyncResult]) -> None:
     feeds = feed_results
     jooble = _feed_or_zero(feeds, "jooble")
     whatjobs = _feed_or_zero(feeds, "whatjobs")
@@ -481,9 +481,9 @@ def _save_run_report(dest_engine, report: dict, enrichment: ijd.EnrichmentResult
             finished_at=datetime.fromisoformat(report["finished_at"]),
             duration_sec=report["duration_sec"],
             status=report["status"],
-            openai_processed=enrichment.processed,
-            enriched_deleted=enrichment.deleted,
-            enriched_total=enrichment.total,
+            openai_processed=0,
+            enriched_deleted=0,
+            enriched_total=0,
             linkedin_active=0,
             linkedin_inserted=0,
             linkedin_deleted=0,
@@ -528,8 +528,7 @@ def run_pipeline(
     artifact_platforms = _artifact_platforms_for_feeds(feed_names)
 
     started_at = _utc_now_naive()
-    dest_engine = ijd.create_database_engine()
-    enrichment = ijd.EnrichmentResult(processed=0, deleted=0, total=0, eligible_active=0)
+    dest_engine = create_database_engine()
     feed_results: dict[str, SyncResult] = {}
 
     if artifacts_only:
@@ -556,11 +555,10 @@ def run_pipeline(
                 started_at=started_at,
                 finished_at=finished_at,
                 status="success",
-                enrichment=enrichment,
                 feed_results={},
             )
             report["artifacts"] = artifact_stats
-            _save_run_report(dest_engine, report, enrichment, {})
+            _save_run_report(dest_engine, report, {})
             print("\n" + json.dumps(report, indent=2, ensure_ascii=False))
             try:
                 notify_pipeline_result(report)
@@ -573,12 +571,11 @@ def run_pipeline(
                 started_at=started_at,
                 finished_at=finished_at,
                 status="failed",
-                enrichment=enrichment,
                 feed_results={},
                 error_message=str(e),
             )
             try:
-                _save_run_report(dest_engine, report, enrichment, {})
+                _save_run_report(dest_engine, report, {})
             except Exception:
                 pass
             try:
@@ -606,7 +603,7 @@ def run_pipeline(
         # Fresh connections per phase: long-lived sockets die on MySQL wait_timeout
         # (seen as OperationalError 2013 during Sync adzuna after multi-hour runs).
         print("=" * 60)
-        print("Job feed pipeline — OpenAI enrichment skipped")
+        print("Job feed pipeline — incremental sync")
         print("=" * 60)
         print(f"Feeds: {', '.join(c.name for c in configs)}")
         if refresh_descriptions is True:
@@ -690,12 +687,11 @@ def run_pipeline(
             started_at=started_at,
             finished_at=finished_at,
             status="success",
-            enrichment=enrichment,
             feed_results=feed_results,
         )
         if artifact_stats:
             report["artifacts"] = artifact_stats
-        _save_run_report(dest_engine, report, enrichment, feed_results)
+        _save_run_report(dest_engine, report, feed_results)
         print("\n" + json.dumps(report, indent=2, ensure_ascii=False))
         try:
             notify_pipeline_result(report)
@@ -707,21 +703,15 @@ def run_pipeline(
         finished_at = _utc_now_naive()
         partial = feed_results or {c.name: SyncResult(0, 0, 0, 0, 0) for c in configs}
         error_message = str(e)
-        if isinstance(e, ijd.OpenAIEnrichmentError):
-            error_message = (
-                f"OpenAI enrichment aborted: {e}. "
-                "Fix OPENAI_API_KEY and TRUNCATE job_description_enriched if needed before retry."
-            )
         report = _build_report(
             started_at=started_at,
             finished_at=finished_at,
             status="failed",
-            enrichment=enrichment,
             feed_results=partial,
             error_message=error_message,
         )
         try:
-            _save_run_report(dest_engine, report, enrichment, partial)
+            _save_run_report(dest_engine, report, partial)
         except Exception:
             pass
         try:

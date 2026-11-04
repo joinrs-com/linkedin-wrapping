@@ -1,0 +1,54 @@
+"""Destination database engine for feed sync, refresh and monitoring scripts.
+
+Callers load the project .env before creating the engine. Importing this module
+never loads credentials or opens a database connection.
+"""
+
+import os
+
+from sqlalchemy.engine.url import make_url
+from sqlmodel import create_engine
+
+
+def create_database_engine():
+    """Crea l'engine del database con configurazione appropriata."""
+    url = os.getenv("DATABASE_URL")
+    if not url or not str(url).strip():
+        raise ValueError(
+            "DATABASE_URL mancante o vuota nel .env. "
+            "Esempio: DATABASE_URL=mysql+pymysql://USER:PASSWORD@HOST:3306/NOME_DATABASE"
+        )
+    try:
+        make_url(url)
+    except Exception:
+        raise ValueError(
+            "DATABASE_URL nel .env non è una URL SQLAlchemy valida. "
+            "Usa mysql+pymysql://USER:PASSWORD@HOST:PORT/DATABASE su una sola riga; "
+            "nella password codifica i caratteri speciali con urllib.parse.quote_plus."
+        ) from None
+
+    connect_args: dict = {}
+    if "sqlite" in url:
+        connect_args = {"check_same_thread": False}
+    elif "mysql" in url:
+        # Artifact UPSERT can push 50–80MB gzip blobs (jooble_usa); keep write open longer.
+        connect_args = {
+            "connect_timeout": 60,
+            "read_timeout": 1800,
+            "write_timeout": 1800,
+        }
+    engine = create_engine(
+        url,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+        echo=False,
+        connect_args=connect_args,
+    )
+
+    # Gestione schema per MySQL
+    if engine.dialect.name == "mysql":
+        engine = engine.execution_options(schema_translate_map={
+            "lw": None,
+        })
+
+    return engine

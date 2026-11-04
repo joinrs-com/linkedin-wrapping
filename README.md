@@ -70,6 +70,17 @@ docker build -t linkedin-wrapping-service .
 docker run -p 3000:3000 -e DATABASE_URL="your-db-url" linkedin-wrapping-service
 ```
 
+## Strumenti mantenuti
+
+- `scripts/run_job_feed_pipeline.py`: sincronizzazione incrementale e generazione feed XML gzip.
+- `scripts/refresh_descriptions_and_artifacts.py`: aggiornamento description dalla sorgente, normalizzazione HTML e rigenerazione artifact, senza OpenAI.
+- `scripts/watch_job_feed_progress.py`: monitoraggio conteggi e ultimo run.
+- `scripts/check_feed_endpoints.py`, `scripts/smoke_feed_endpoints.sh`: controlli feed.
+- `scripts/count_feed_buckets.py`, `scripts/count_explode_feeds.py`: conteggi diagnostici.
+- `scripts/trigger_job_feed_k8s.sh`: avvio manuale della pipeline nel cluster.
+
+Il modulo di classificazione blue/white collar `enrichment` e la vecchia pipeline di riscrittura OpenAI sono stati rimossi. Le migrazioni Alembic e i modelli delle tabelle storiche restano per compatibilità con i database esistenti; la pulizia del codice non elimina tabelle o dati. I campi storici OpenAI nei report rimangono a zero.
+
 ## API Endpoints
 
 ### GET /wrapping/jooble/it
@@ -171,7 +182,7 @@ Root endpoint with service information.
 
 ## Job feed pipeline (automatica)
 
-`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT nuovi, DELETE scaduti, mai TRUNCATE). Jooble/Adzuna usano **two-phase select** (meta senza description, poi body solo per `job_posting_id` nuovi) + HTML normalize. Il refresh delle description esistenti è **off** di default (`--refresh-descriptions` per abilitarlo). OpenAI enrichment è **disattivato**.
+`scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT nuovi, DELETE scaduti, mai TRUNCATE). Jooble/Adzuna usano **two-phase select** (meta senza description, poi body solo per `job_posting_id` nuovi) + HTML normalize. Il refresh delle description esistenti è **off** di default (`--refresh-descriptions` per abilitarlo). La pipeline non usa OpenAI e non richiede chiavi API.
 
 Sync: `jooble_job_feed` (4 bucket), `adzuna_job_feed` (4 bucket), `whatjobs_job_feed`, `hirematic_job_feed`, `jobrapido_job_feed`. (`jooble_abroad_job_feed` non più sincronizzata.)
 
@@ -230,7 +241,7 @@ Report ultimo run:
 SELECT * FROM job_feed_pipeline_run ORDER BY id DESC LIMIT 1;
 ```
 
-Dopo il deploy, esegui le migrazioni fino a `0018`:
+Per aggiornare lo schema alla versione corrente:
 
 ```bash
 cd api/wrapping && alembic upgrade head
@@ -242,25 +253,19 @@ Health check endpoint.
 
 ## Testing
 
-Root endpoint with service information.
-
-## Testing
-
 I test automatici vivono solo in [`tests/`](tests/). La root del repo contiene [`pytest.ini`](pytest.ini) con `testpaths = tests`, così `pytest` non raccoglie file sotto `scripts/` anche se il nome assomiglia a un test.
 
 Esegui la suite da root:
 
 ```bash
-python3 -m pytest
+DATABASE_URL=sqlite:// .venv/bin/python -m pytest
 ```
 
 Equivalente esplicito:
 
 ```bash
-python3 -m pytest tests/ -v
+DATABASE_URL=sqlite:// .venv/bin/python -m pytest tests/ -v
 ```
-
-**Demo manuale OpenAI** (non è un test pytest; richiede `.env` con DB e chiave): `python3 scripts/demo_improve_job_descriptions.py`
 
 Test HTTP endpoints using `test_wrapping.http` file.
 

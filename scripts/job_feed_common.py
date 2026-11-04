@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 # Jooble/Adzuna full-catalog SELECT ships description on every explode row.
@@ -110,17 +110,24 @@ def create_mysql_engine(url: str) -> Engine:
     # Long feed syncs (normalize + multi-row INSERT) need generous I/O timeouts;
     # pool_pre_ping recovers stale pooled connections between chunks.
     # binary_prefix=_binary helps large LONGBLOB upserts stay intact over text protocol.
+    parsed_url = make_url(url)
+    if parsed_url.get_backend_name() != "mysql":
+        raise ValueError(f"Atteso MySQL, trovato {parsed_url.get_backend_name()}")
+    driver = parsed_url.get_driver_name()
+    connect_args = {
+        "connection_timeout" if driver == "mysqlconnector" else "connect_timeout": 60,
+        "read_timeout": 1800,
+        "write_timeout": 1800,
+    }
+    # mysql-connector-python rejects binary_prefix before opening the connection.
+    if driver == "pymysql":
+        connect_args["binary_prefix"] = True
     eng = create_engine(
-        url,
+        parsed_url,
         pool_recycle=1800,
         pool_pre_ping=True,
         echo=False,
-        connect_args={
-            "connect_timeout": 60,
-            "read_timeout": 1800,
-            "write_timeout": 1800,
-            "binary_prefix": True,
-        },
+        connect_args=connect_args,
     )
     if eng.dialect.name != "mysql":
         raise ValueError(f"Atteso MySQL, trovato {eng.dialect.name}")

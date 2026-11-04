@@ -6,13 +6,10 @@ GET http://localhost:3000/health
 GET http://localhost:3000/
 
 ### Get Wrapping – Jooble (jooble_job_feed, pipeline automatica)
-GET http://localhost:3000/wrapping/jooble
+GET http://localhost:3000/wrapping/jooble/it
 
 ### Get Wrapping – Talent.com (stesso feed di Jooble)
-GET http://localhost:3000/wrapping/talent
-
-### Get Wrapping – Jooble abroad (enterprise multi-paese, jooble_abroad_job_feed)
-GET http://localhost:3000/wrapping/jooble/abroad
+GET http://localhost:3000/wrapping/talent/it
 
 ### Get Wrapping – Hirematic (Appcast XML da hirematic_job_feed)
 GET http://localhost:3000/wrapping/hirematic
@@ -21,7 +18,7 @@ GET http://localhost:3000/wrapping/hirematic
 GET http://localhost:3000/wrapping/whatjobs
 
 ### Get Wrapping – Adzuna (XML da adzuna_job_feed, Italia + CPC)
-GET http://localhost:3000/wrapping/adzuna
+GET http://localhost:3000/wrapping/adzuna/it
 
 ### Get Wrapping – Job Rapido (XML ufficiale da jobrapido_job_feed + CPC)
 GET http://localhost:3000/wrapping/jobrapido

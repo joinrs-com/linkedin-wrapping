@@ -3,7 +3,7 @@
 
 Safe to interrupt and re-run: already-updated descriptions are skipped (resume).
 
-Run in Terminal.app with VPN (Cursor agent cannot use VPN DNS):
+Run with access to the database network (VPN when required):
 
     cd ~/development/linkedin-wrapping
     set -a && source .env && set +a
@@ -22,7 +22,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "scripts"))
 load_dotenv(project_root / ".env", override=True)
 
-import improve_job_descriptions as ijd  # noqa: E402
+from feed_database import create_database_engine  # noqa: E402
 from job_feed_common import create_mysql_engine, load_sql, sync_feed_table  # noqa: E402
 from run_job_feed_pipeline import FEED_CONFIGS, _generate_feed_xml_artifacts  # noqa: E402
 
@@ -32,7 +32,7 @@ def main() -> None:
         raise SystemExit("DATABASE_URL and JOB_FEED_SOURCE_DATABASE_URL required")
 
     src = create_mysql_engine(os.environ["JOB_FEED_SOURCE_DATABASE_URL"])
-    dest = ijd.create_database_engine()
+    dest = create_database_engine()
 
     for name in ("jooble", "adzuna"):
         cfg = next(c for c in FEED_CONFIGS if c.name == name)
