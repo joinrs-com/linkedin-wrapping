@@ -20,7 +20,7 @@ router.get("/jooble/eu")(wrapping.get_wrapping_jooble_eu)
 router.get("/jooble/americas")(wrapping.get_wrapping_jooble_americas)
 router.get("/jooble/asia")(wrapping.get_wrapping_jooble_asia)
 router.get("/jooble/row")(wrapping.get_wrapping_jooble_row)
-router.get("/jooble/abroad")(wrapping.get_wrapping_jooble_abroad)  # deprecated
+router.get("/jooble/abroad", deprecated=True, responses={410: {"description": "Feed retired; use geographic feeds"}})(wrapping.get_wrapping_jooble_abroad)
 
 router.get("/hirematic")(wrapping.get_wrapping_hirematic)
 router.get("/whatjobs")(wrapping.get_wrapping_whatjobs)

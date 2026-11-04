@@ -181,32 +181,6 @@ class JoobleJobFeed(SQLModel, table=True):
     bucket: str | None = Field(default=None, max_length=16)
 
 
-class JoobleAbroadJobFeed(SQLModel, table=True):
-    """Maps `lw.jooble_abroad_job_feed`; Jooble abroad feed (one row per city, pipeline, no OpenAI)."""
-
-    __tablename__ = "jooble_abroad_job_feed"
-    __table_args__ = _resolve_schema()
-
-    id: str = Field(primary_key=True, max_length=64)
-    job_posting_id: int = Field(sa_column=Column("job_posting_id", BigInteger, nullable=False))
-    position: str
-    employers_name: str | None = None
-    employers_id: int | None = None
-    priority: int | None = None
-    description: str | None = Field(default=None, sa_column=Column("description", Text, nullable=True))
-    company: str | None = None
-    apply_url: str | None = None
-    company_id: str | None = None
-    location: str | None = Field(default=None, sa_column=Column("location", Text, nullable=True))
-    countries: str | None = Field(default=None, sa_column=Column("countries", Text, nullable=True))
-    workplace_types: str | None = None
-    experience_level: str | None = None
-    jobtype: str | None = None
-    partner_job_id: str | None = None
-    last_build_date: datetime | None = None
-    salary: str | None = Field(default=None, sa_column=Column("salary", String(100), nullable=True))
-
-
 class WhatjobsJobFeed(SQLModel, table=True):
     """Maps `lw.whatjobs_job_feed`; WhatJobs Italy feed."""
 

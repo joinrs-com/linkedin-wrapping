@@ -168,3 +168,6 @@
 
 # Share empty environment templates, never local credentials.
 !**/.env.example
+
+# Local database safety copies
+.backups/

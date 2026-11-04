@@ -430,56 +430,33 @@ def test_wrapping_serves_storage_uri_artifact(client: TestClient, tmp_path, monk
     assert b"full description text" in body
 
 
-def test_wrapping_jooble_abroad_empty(client: TestClient):
-    """Jooble abroad endpoint with no jobs returns valid XML."""
+@pytest.mark.parametrize("cached_artifact", [False, True])
+def test_wrapping_jooble_abroad_retired(client: TestClient, cached_artifact):
+    """Retirement takes precedence over stale artifacts and needs no database access."""
+    if cached_artifact:
+        get_sess = list(app.dependency_overrides.values())[0]
+        with next(get_sess()) as session:
+            session.add(models.FeedXmlArtifact(
+                feed_name="jooble_abroad",
+                payload=gzip.compress(b"<source><job>old</job></source>"),
+                job_count=1,
+                generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            ))
+            session.commit()
+
+    def database_must_not_be_used():
+        raise AssertionError("The retired endpoint must not query a database")
+
+    app.dependency_overrides[original_get_session] = database_must_not_be_used
     r = client.get("/wrapping/jooble/abroad")
-    assert r.status_code == 200
-    assert "application/xml" in r.headers.get("content-type", "")
-    assert "<source>" in r.text
-    assert "<lastBuildDate>" in r.text
-
-
-def test_wrapping_jooble_abroad_one_job(client: TestClient):
-    """Jooble abroad: countries, employers_id, apply URL without query params."""
-    _now = datetime.now(timezone.utc)
-    get_sess = list(app.dependency_overrides.values())[0]
-    with next(get_sess()) as s:  # type: ignore
-        row = models.JoobleAbroadJobFeed(
-            id="3218063-1",
-            job_posting_id=3218063,
-            position="Software Engineer",
-            employers_name="Acme Corp",
-            employers_id=589893,
-            priority=2,
-            description="<p>Enterprise role abroad</p>",
-            company="Joinrs",
-            apply_url="https://www.joinrs.com/jobs/3218063",
-            company_id="829928",
-            location="Berlin",
-            countries="DEU",
-            workplace_types="Remote",
-            experience_level="Mid Level",
-            jobtype="Full Time",
-            partner_job_id="3218063-1",
-            last_build_date=_now,
-        )
-        s.add(row)
-        s.commit()
-
-    r = client.get("/wrapping/jooble/abroad")
-    assert r.status_code == 200
-    assert "<company><![CDATA[Acme Corp]]></company>" in r.text
-    assert "<priority><![CDATA[2]]></priority>" in r.text
-    assert "<employers_id><![CDATA[589893]]></employers_id>" in r.text
-    assert "<countries><![CDATA[DEU]]></countries>" in r.text
-    assert "<partnerJobId><![CDATA[3218063-1]]></partnerJobId>" in r.text
-    assert "<location><![CDATA[Berlin]]></location>" in r.text
-    assert "<applyUrl><![CDATA[https://www.joinrs.com/jobs/3218063]]></applyUrl>" in r.text
-    assert "utm_" not in r.text.split("<applyUrl>")[1].split("</applyUrl>")[0]
-
-    r2 = client.get("/wrapping/jooble/it")
-    assert r2.status_code == 200
-    assert "<countries>" not in r2.text
+    assert r.status_code == 410
+    assert r.headers["content-type"].startswith("application/json")
+    detail = r.json()["detail"]
+    assert "retired" in detail["message"]
+    assert "/wrapping/jooble/us/1" in detail["replacement_paths"]
+    assert "/wrapping/jooble/eu" in detail["replacement_paths"]
+    assert len(detail["replacement_paths"]) == 15
+    assert "jooble_abroad_job_feed" not in SQLModel.metadata.tables
 
 
 def test_wrapping_hirematic_empty(client: TestClient):

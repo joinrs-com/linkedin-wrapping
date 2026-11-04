@@ -1,6 +1,6 @@
 import html
 import re
-from fastapi import Depends, Response
+from fastapi import Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 from datetime import datetime, timezone
@@ -15,7 +15,6 @@ from api.wrapping.service import (
     get_feed_xml_artifact,
     get_hirematic_job_feed_rows,
     get_jobrapido_job_feed_rows,
-    get_jooble_abroad_job_feed_rows,
     get_jooble_job_feed_rows,
     get_whatjobs_job_feed_rows,
 )
@@ -574,26 +573,17 @@ async def get_wrapping_talent_row(session: Session = Depends(get_session)) -> Re
     return _feed_response(session, platform="talent", feed="row", talent=True)
 
 
-async def get_wrapping_jooble_abroad(session: Session = Depends(get_session)) -> Response:
-    """Deprecated: use /jooble/us/1..5. Live fallback = all USA shards."""
-    cached = _response_from_artifact(session, "jooble_abroad")
-    if cached is not None:
-        return cached
-    rows = get_jooble_job_feed_rows(
-        session, buckets=[f"usa_{i}" for i in range(1, 6)]
+async def get_wrapping_jooble_abroad() -> Response:
+    """Retired endpoint; geographic feeds replace the old abroad table."""
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "message": "This feed has been retired. Use the geographic Jooble feeds.",
+            "replacement_paths": [f"/wrapping/jooble/us/{i}" for i in range(1, 6)]
+            + [f"/wrapping/jooble/{region}" for region in
+               ("it", "it5", "es", "uk", "fr", "de", "eu", "americas", "asia", "row")],
+        },
     )
-    if not rows:
-        rows = get_jooble_abroad_job_feed_rows(session)
-    xml_content = generate_wrapping_xml(
-        rows,
-        apply_url_mode="jooble",
-        prefer_employers_name_as_company=True,
-        include_priority=True,
-        include_employers_id=True,
-        include_countries=True,
-        include_country_code=True,
-    )
-    return Response(content=xml_content.encode("utf-8"), media_type="application/xml; charset=utf-8")
 
 
 async def get_wrapping_hirematic(session: Session = Depends(get_session)) -> Response:

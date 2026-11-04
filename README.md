@@ -6,7 +6,7 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 - GET `/wrapping/jooble/it`, `/it5`, `/es`, `/us/1`…`/us/5`, `/uk`, `/fr`, `/de`, `/eu`, `/americas`, `/asia`, `/row` – Jooble, 15 feed; artefatto gzip in MySQL; **no CPC**; `<countryCode>`
 - GET `/wrapping/talent/…` / `/adzuna/…` — stessi 15 path di Jooble (Adzuna con **`<cpc>`**)
-- GET `/wrapping/jooble/abroad` — **deprecato** (usa `/jooble/us/1`…`/5`)
+- GET `/wrapping/jooble/abroad` — **ritirato, HTTP 410** (usa i feed geografici)
 - GET `/wrapping/whatjobs` / `hirematic` / `jobrapido` – invariati
 - Database migrations (`lw`), Helm, CI/CD, pytest
 
@@ -118,7 +118,7 @@ python scripts/run_job_feed_pipeline.py
 
 ### GET /wrapping/jooble/abroad
 
-Feed Jooble **abroad**: unione di (A) regole enterprise non Italia-only (product pro/one/unlimited, combo con ITA) e (B) **tutti** gli annunci ESP con filtri Italia (NULL product ammesso → Adecco Spain). XML da artefatto gzip. Intro EN per non-Joinrs; tag `<countries>` incluso.
+Endpoint ritirato: restituisce **HTTP 410 Gone** con i path dei feed geografici sostitutivi. La tabella `jooble_abroad_job_feed` viene rimossa dalla migrazione `0025_drop_jooble_abroad`; prima di applicarla occorre una copia di sicurezza dei dati. Il downgrade ricrea solo lo schema vuoto.
 
 ### GET /wrapping/whatjobs
 
@@ -184,7 +184,7 @@ Root endpoint with service information.
 
 `scripts/run_job_feed_pipeline.py` sincronizza in modo **incrementale** (INSERT nuovi, DELETE scaduti, mai TRUNCATE). Jooble/Adzuna usano **two-phase select** (meta senza description, poi body solo per `job_posting_id` nuovi) + HTML normalize. Il refresh delle description esistenti è **off** di default (`--refresh-descriptions` per abilitarlo). La pipeline non usa OpenAI e non richiede chiavi API.
 
-Sync: `jooble_job_feed` (4 bucket), `adzuna_job_feed` (4 bucket), `whatjobs_job_feed`, `hirematic_job_feed`, `jobrapido_job_feed`. (`jooble_abroad_job_feed` non più sincronizzata.)
+Sync: `jooble_job_feed` (15 bucket), `adzuna_job_feed` (15 bucket), `whatjobs_job_feed`, `hirematic_job_feed`, `jobrapido_job_feed`. Talent condivide i dati Jooble.
 
 ```bash
 # tutti i feed

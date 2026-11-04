@@ -34,7 +34,6 @@ _SYNC_FEED_ORDER = (
     "whatjobs",
     "hirematic",
     "jobrapido",
-    "jooble_abroad",
 )
 
 

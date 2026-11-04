@@ -8,7 +8,6 @@ from api.wrapping.models import (
     HirematicJobFeed,
     JobPostings,
     JobrapidoJobFeed,
-    JoobleAbroadJobFeed,
     JoobleJobFeed,
     WhatjobsJobFeed,
 )
@@ -60,13 +59,6 @@ def get_jooble_job_feed_rows(
         asc(JoobleJobFeed.priority),
         desc(JoobleJobFeed.last_build_date),
     )
-    results = session.exec(statement)
-    return list(results.all())
-
-
-def get_jooble_abroad_job_feed_rows(session: Session) -> List[JoobleAbroadJobFeed]:
-    """Deprecated table; prefer /jooble/us/1..5. Kept for live fallback."""
-    statement = select(JoobleAbroadJobFeed)
     results = session.exec(statement)
     return list(results.all())
 

@@ -6,3 +6,6 @@
 **/.env
 **/.env.*
 **/*.log
+
+# Local database safety copies
+.backups/
