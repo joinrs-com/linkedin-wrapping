@@ -12,7 +12,7 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 ## Sponsorship feed XML
 
-**15 feed** (explode città + country; tutte priority/product; blacklist `1179402`), description **intere**, gzip in MySQL `feed_xml_artifact`:
+**15 feed** (explode città + country; tutte priority/product; blacklist `1179402`), description **intere**, gzip in MySQL `feed_xml_artifact` (split così ogni artifact resta sotto `max_allowed_packet`):
 
 | Feed | Contenuto | Path (es. Jooble) |
 | --- | --- | --- |
@@ -28,7 +28,9 @@ FastAPI service that provides job posting XML feeds for partner platforms.
 
 Colonna `bucket` = feed key. Stesso schema per Talent e Adzuna.
 
-Vincoli: Jooble/Talent **senza** `<cpc>`; Adzuna **con** CPC. Smoke: `bash scripts/smoke_feed_endpoints.sh`.
+Dopo ogni scrittura artifact: **verify-after-write** (`LENGTH(payload)` + gunzip CRC). `Content-Length` usa la lunghezza reale del blob MySQL. Opzionale: `FEED_XML_S3_BUCKET` / `feedXmlStorage.bucket` per salvare i gzip fuori da MySQL. La pipeline fa anche purge dei job solo in `job_postings_archived_1`.
+
+Vincoli: Jooble/Talent **senza** `<cpc>`; Adzuna **con** CPC. Smoke: `bash scripts/smoke_feed_endpoints.sh`. Health: `python scripts/check_feed_endpoints.py` (HTTP + integrity DB se `DATABASE_URL` è settata).
 
 ## Setup
 
@@ -186,8 +188,27 @@ python scripts/run_job_feed_pipeline.py --refresh-descriptions
 
 - `DATABASE_URL` — joinrs-intelligence / `lw` (destinazione)
 - `JOB_FEED_SOURCE_DATABASE_URL` — mysql-production01 / `job_postings` (sorgente)
+- `SLACK_WEBHOOK_URL` — (opzionale) Incoming Webhook: report dopo ogni pipeline + alert se endpoint unhealthy
+- `FEED_PUBLIC_BASE_URL` — base URL probe HTTP (default `https://lw.joinrs.com`)
+- `FEED_STALE_HOURS` — soglia stale su `X-Feed-Generated-At` (default `24`)
 
 **CronJob K8s:** 6:00 e 15:00 Europe/Rome (`helm-chart`, `jobFeedPipeline.enabled: true`). `activeDeadlineSeconds` = 24h. Preferisci il Job in-cluster (VPC → RDS) rispetto al laptop/VPN.
+
+**Slack ops**
+
+1. Dopo ogni run della pipeline: messaggio con `success`/`failed`, duration, sync counts (jooble/adzuna/whatjobs/hirematic/jobrapido) e `job_count` per artifact (15 feed × piattaforma).
+2. Cron orario `feedHealthCheck` (`scripts/check_feed_endpoints.py`): curl di tutti i `/wrapping/*` pubblici; Slack **solo su failure** (5xx, XML senza gzip/job, artifact stale). Success silenzioso.
+
+```bash
+# Slack → App → Incoming Webhooks → canale aziendale
+kubectl -n lw create secret generic slack-webhook \
+  --from-literal=url='https://hooks.slack.com/services/XXX/YYY/ZZZ'
+
+# Manuale (laptop):
+python scripts/check_feed_endpoints.py --verbose
+```
+
+Senza `SLACK_WEBHOOK_URL` / secret, pipeline e health check restano no-op su Slack.
 
 Trigger manuale (richiede `kubectl` + contesto EKS sul namespace `lw`):
 
@@ -269,5 +290,7 @@ helm install linkedin-wrapping ./helm-chart \
 
 - `DATABASE_URL`: Database connection string (required, destinazione lw)
 - `JOB_FEED_SOURCE_DATABASE_URL`: MySQL production read (pipeline CronJob)
-
+- `SLACK_WEBHOOK_URL`: Slack Incoming Webhook (pipeline + feed-health CronJobs; optional secret `slack-webhook`)
+- `FEED_PUBLIC_BASE_URL`: Public base for feed health probes (default `https://lw.joinrs.com`)
+- `FEED_STALE_HOURS`: Max age for artifact `X-Feed-Generated-At` (health Cron)
 

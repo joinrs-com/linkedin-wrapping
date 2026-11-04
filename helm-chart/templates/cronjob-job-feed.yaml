@@ -48,6 +48,14 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.jobFeedPipeline.openaiSecretName | quote }}
                       key: {{ .Values.jobFeedPipeline.openaiSecretKey | quote }}
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.jobFeedPipeline.slackWebhookSecretName | quote }}
+                      key: {{ .Values.jobFeedPipeline.slackWebhookSecretKey | quote }}
+                      optional: true
+                - name: FEED_PUBLIC_BASE_URL
+                  value: {{ .Values.jobFeedPipeline.feedPublicBaseUrl | quote }}
                 {{- if .Values.feedXmlStorage.bucket }}
                 - name: FEED_XML_S3_BUCKET
                   value: {{ .Values.feedXmlStorage.bucket | quote }}
