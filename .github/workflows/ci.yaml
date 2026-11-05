@@ -9,6 +9,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-test-password
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: lw_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pci-test-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -22,6 +36,7 @@ jobs:
     - name: Check dependencies and run tests
       env:
         DATABASE_URL: sqlite://
+        MYSQL_ARTIFACT_TEST_URL: mysql+mysqlconnector://root:ci-test-password@127.0.0.1:3306/lw_test
       run: |
         python -m pip check
         python -m pytest -q

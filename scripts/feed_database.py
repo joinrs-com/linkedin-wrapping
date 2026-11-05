@@ -5,9 +5,22 @@ never loads credentials or opens a database connection.
 """
 
 import os
+from importlib.metadata import PackageNotFoundError, version
 
 from sqlalchemy.engine.url import make_url
 from sqlmodel import create_engine
+
+
+def database_driver_label(engine) -> str:
+    """Report the actual driver package without exposing connection credentials."""
+    driver = engine.dialect.driver
+    package = {"mysqlconnector": "mysql-connector-python", "pymysql": "PyMySQL"}.get(driver)
+    if package:
+        try:
+            return f"{driver} {version(package)}"
+        except PackageNotFoundError:
+            pass
+    return driver
 
 
 def mysql_connect_args(url) -> dict:

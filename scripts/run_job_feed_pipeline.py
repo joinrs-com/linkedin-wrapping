@@ -38,7 +38,7 @@ _env_file = project_root / ".env"
 if _env_file.is_file():
     load_dotenv(_env_file, override=True)
 
-from feed_database import create_database_engine  # noqa: E402
+from feed_database import create_database_engine, database_driver_label  # noqa: E402
 from feed_alerts import notify_pipeline_result  # noqa: E402
 from job_feed_common import (  # noqa: E402
     SyncResult,
@@ -527,6 +527,7 @@ def run_pipeline(
 
     started_at = _utc_now_naive()
     dest_engine = create_database_engine()
+    print(f"Destination database driver: {database_driver_label(dest_engine)}", flush=True)
     feed_results: dict[str, SyncResult] = {}
 
     if artifacts_only:
