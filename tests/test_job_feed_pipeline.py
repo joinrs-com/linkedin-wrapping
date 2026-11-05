@@ -24,9 +24,11 @@ from job_feed_common import (  # noqa: E402
 
 
 @pytest.mark.parametrize("driver", ["pymysql", "mysqlconnector"])
-def test_mysql_engine_options_are_accepted_by_selected_driver(monkeypatch, driver):
+@pytest.mark.parametrize("factory", ["source", "destination"])
+def test_mysql_engine_options_are_accepted_by_selected_driver(monkeypatch, driver, factory):
     """Validate options with the real DB driver, without opening network sockets."""
     import job_feed_common as common
+    import feed_database
 
     real_create_engine = common.create_engine
 
@@ -40,11 +42,18 @@ def test_mysql_engine_options_are_accepted_by_selected_driver(monkeypatch, drive
             MySQLConnection().config(**params)
         else:
             from pymysql.connections import Connection
-            Connection(defer_connect=True, **params)
+            connection = Connection(defer_connect=True, **params)
+            assert connection._binary_prefix is True
         return engine
 
     monkeypatch.setattr(common, "create_engine", validate_options)
-    engine = common.create_mysql_engine(f"mysql+{driver}://test:test@localhost/test")
+    monkeypatch.setattr(feed_database, "create_engine", validate_options)
+    url = f"mysql+{driver}://test:test@localhost/test"
+    if factory == "source":
+        engine = common.create_mysql_engine(url)
+    else:
+        monkeypatch.setenv("DATABASE_URL", url)
+        engine = feed_database.create_database_engine()
     engine.dispose()
 
 

@@ -15,6 +15,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.exc import DBAPIError, OperationalError
 
+from feed_database import mysql_connect_args
+
 # Jooble/Adzuna full-catalog SELECT ships description on every explode row.
 # Phase-1 slim replaces that expression so id/meta sync stays light.
 _DESCRIPTION_SELECT_RE = re.compile(
@@ -113,21 +115,12 @@ def create_mysql_engine(url: str) -> Engine:
     parsed_url = make_url(url)
     if parsed_url.get_backend_name() != "mysql":
         raise ValueError(f"Atteso MySQL, trovato {parsed_url.get_backend_name()}")
-    driver = parsed_url.get_driver_name()
-    connect_args = {
-        "connection_timeout" if driver == "mysqlconnector" else "connect_timeout": 60,
-        "read_timeout": 1800,
-        "write_timeout": 1800,
-    }
-    # mysql-connector-python rejects binary_prefix before opening the connection.
-    if driver == "pymysql":
-        connect_args["binary_prefix"] = True
     eng = create_engine(
         parsed_url,
         pool_recycle=1800,
         pool_pre_ping=True,
         echo=False,
-        connect_args=connect_args,
+        connect_args=mysql_connect_args(parsed_url),
     )
     if eng.dialect.name != "mysql":
         raise ValueError(f"Atteso MySQL, trovato {eng.dialect.name}")
@@ -1129,7 +1122,7 @@ def _write_mysql_artifact_payload(
     bytes_uncompressed: int,
     generated_at: datetime,
 ) -> None:
-    """UPSERT gzip into MySQL and verify LENGTH + gunzip (retry once on failure)."""
+    """Verify gzip inside its write transaction; publish only after validation."""
     payload = bytes(payload)
     stmt = _artifact_upsert_stmt()
     params = {
@@ -1145,9 +1138,13 @@ def _write_mysql_artifact_payload(
 
     def _attempt(target: Connection, *, label: str) -> None:
         _raise_max_allowed_packet(target)
-        target.execute(stmt, params)
-        target.commit()
-        _verify_mysql_artifact_payload(target, feed_name=feed_name, expected=payload)
+        try:
+            target.execute(stmt, params)
+            _verify_mysql_artifact_payload(target, feed_name=feed_name, expected=payload)
+            target.commit()
+        except Exception:
+            target.rollback()
+            raise
         print(
             f"  artifact {feed_name}: MySQL payload verified "
             f"({len(payload)} bytes, {label})",
